@@ -130,7 +130,26 @@ public:
         
         double target_x, target_y;
         state_.getTarget(target_x, target_y);
-        
+
+        // 动态增益与卡住检测
+        double current_speed = getCurrentSpeed();
+        double dynamic_gain = computeDynamicGain(current_speed);
+
+        if (isRobotStuck(current_speed, target_x, target_y)) {
+            int stuck_count = state_.stuck_frame_count.load() + 1;
+            state_.stuck_frame_count.store(stuck_count);
+            if (stuck_count >= APF_VORTEX_THRESHOLD && !state_.vortex_active.load()) {
+                std::vector<std::pair<double, double>> pts = state_.getPoints();
+                int vdir = computeVortexDirection(pts);
+                state_.vortex_direction.store(vdir);
+                state_.vortex_active.store(true);
+            }
+        } else {
+            state_.stuck_frame_count.store(0);
+            state_.vortex_active.store(false);
+            state_.vortex_direction.store(0);
+        }
+
         cv::Mat image;
         if (enable_opencv_) {
             image = cv::Mat::zeros(TOTAL_WINDOW_HEIGHT, WINDOW_SIZE, CV_8UC3);
@@ -194,7 +213,7 @@ public:
             
             // 势场法：计算排斥力（排除机器人框架区域，只考虑前方和侧方障碍）
             if (!in_robot_frame && dist_to_robot < APF_INFLUENCE_DIST && point_x > -0.1) {
-                double force = APF_REPULSE_GAIN * (1.0 / dist_to_robot - 1.0 / APF_INFLUENCE_DIST) 
+                double force = dynamic_gain * (1.0 / dist_to_robot - 1.0 / APF_INFLUENCE_DIST)
                                / (dist_to_robot * dist_to_robot);
                 repulse_x -= force * point_x / dist_to_robot;
                 repulse_y -= force * point_y / dist_to_robot;
@@ -392,6 +411,20 @@ private:
             cmd.linear.y = lateral_error * LINEAR_Y_SCALE_FACTOR;
         }
         
+        // 涡旋场调制：卡住时将排斥力旋转90度绕开障碍
+        if (state_.vortex_active.load()) {
+            int vdir = state_.vortex_direction.load();
+            double rx = repulse_x;
+            double ry = repulse_y;
+            if (vdir > 0) {
+                repulse_x =  ry;
+                repulse_y = -rx;
+            } else {
+                repulse_x = -ry;
+                repulse_y =  rx;
+            }
+        }
+
         // 融合势场排斥力
         cmd.linear.x += repulse_x;
         cmd.linear.y += repulse_y;
@@ -410,6 +443,42 @@ private:
         cmd.angular.z = std::clamp(cmd.angular.z, -MAX_ANGULAR_SPEED, MAX_ANGULAR_SPEED);
     }
     
+    // 获取当前合成速度
+    double getCurrentSpeed() {
+        double vx, vy, wz;
+        state_.getVelocity(vx, vy, wz);
+        return std::sqrt(vx * vx + vy * vy);
+    }
+
+    // 动态排斥力增益：速度越大增益越高，提前避障
+    double computeDynamicGain(double current_speed) {
+        double gain = APF_BASE_REPULSE_GAIN * (1.0 + current_speed / MAX_LINEAR_SPEED);
+        return std::clamp(gain, APF_MIN_REPULSE_GAIN, APF_MAX_REPULSE_GAIN);
+    }
+
+    // 判断机器人是否"卡住"（运动模式下未达目标但速度接近零）
+    bool isRobotStuck(double current_speed, double target_x, double target_y) {
+        double target_dist = std::sqrt(target_x * target_x + target_y * target_y);
+        bool target_reached = (target_dist <= FOLLOW_DIST + 0.05);
+        bool is_moving = state_.is_moving_enabled.load();
+        return is_moving && !target_reached && (current_speed < APF_STUCK_SPEED_THRESHOLD);
+    }
+
+    // 障碍物分布不对称性分析：返回涡旋绕行方向
+    int computeVortexDirection(const std::vector<std::pair<double, double>>& points) {
+        double left_weight = 0.0;
+        double right_weight = 0.0;
+        for (const auto& [px, py] : points) {
+            double dist = std::sqrt(px * px + py * py);
+            if (dist < APF_INFLUENCE_DIST && px > -0.1 && dist > 0.01) {
+                double weight = 1.0 / (dist * dist);
+                if (py > 0.0) left_weight += weight;
+                else right_weight += weight;
+            }
+        }
+        return (left_weight > right_weight) ? 1 : -1;
+    }
+
     // 发布速度
     void publishVelocity(const geometry_msgs::msg::Twist& cmd, int mode) {
         if (!velocity_callback_) return;

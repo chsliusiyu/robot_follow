@@ -26,9 +26,13 @@ constexpr double MAX_ANGULAR_SPEED = 1.0;
 
 // 势场法避障参数
 constexpr double APF_INFLUENCE_DIST = 0.25;   // 障碍物影响距离 (米)
-constexpr double APF_REPULSE_GAIN = 0.01;     // 排斥力增益
+constexpr double APF_BASE_REPULSE_GAIN = 0.08; // 排斥力基础增益 (原0.01, 提升8倍)
 constexpr double APF_EMERGENCY_DIST = 0.2;    // 紧急停止距离 (米)
-constexpr double APF_SLOWDOWN_DIST = 0.25;    // 减速距离 (米)
+constexpr double APF_SLOWDOWN_DIST = 0.35;    // 减速距离 (米) (原0.25, 提前预警)
+constexpr double APF_MIN_REPULSE_GAIN = 0.04;  // 动态增益下限
+constexpr double APF_MAX_REPULSE_GAIN = 0.20;  // 动态增益上限
+constexpr double APF_VORTEX_THRESHOLD = 3;      // 连续卡住帧数阈值
+constexpr double APF_STUCK_SPEED_THRESHOLD = 0.03; // 合成速度(m/s)低于此值判定为"卡住"
 
 // 机器人框架排除区域（雷达可能扫描到的内部支架）
 constexpr double ROBOT_FRAME_FRONT = 0.15;    // 前方排除范围 (米)
@@ -100,6 +104,11 @@ struct SharedState {
     std::atomic<bool> active{false};
     std::atomic<bool> is_moving_enabled{false};
     std::atomic<int> control_mode{MODE_FOLLOW};
+
+    // 涡旋场避障状态追踪
+    std::atomic<int> stuck_frame_count{0};    // 连续卡住帧计数
+    std::atomic<bool> vortex_active{false};   // 涡旋场是否激活
+    std::atomic<int> vortex_direction{0};     // 涡旋方向: +1=CCW(右绕), -1=CW(左绕)
     
     // 获取目标位置
     void getTarget(double& x, double& y) {
