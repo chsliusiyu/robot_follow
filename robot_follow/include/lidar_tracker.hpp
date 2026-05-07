@@ -8,6 +8,7 @@
 
 #include "common_types.hpp"
 #include "kalman_filter.hpp"
+#include "dwa_planner.hpp"
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <opencv2/opencv.hpp>
@@ -141,130 +142,56 @@ public:
             return;
         }
         
-        // 处理扫描点
-        double centroid_x = 0.0, centroid_y = 0.0;
-        int points_in_target_count = 0;
-        
-        double target_vec_x = target_x;
-        double target_vec_y = target_y;
-        double target_vec_len = std::sqrt(target_vec_x * target_vec_x + target_vec_y * target_vec_y);
-        double left_y_min = -RECTANGLE_WIDTH / 2;
-        double right_y_min = RECTANGLE_WIDTH / 2;
-        
-        // 势场法：排斥力累积和最近障碍距离
-        double repulse_x = 0.0, repulse_y = 0.0;
-        double min_obstacle_dist = 999.0;
-        
+        // 处理扫描点：过滤并收集障碍信息
         std::vector<std::pair<double, double>> points;
         points.reserve(scan_msg->ranges.size());
-        
+
         for (size_t i = 0; i < scan_msg->ranges.size(); ++i) {
             float range = scan_msg->ranges[i];
             if (std::isinf(range) || std::isnan(range)) continue;
-            
+
             float angle = scan_msg->angle_min + i * scan_msg->angle_increment;
             double point_x = -range * cos(angle);
             double point_y = -range * sin(angle);
-            
+
             // 计算到机器人的距离
             double dist_to_robot = std::sqrt(point_x * point_x + point_y * point_y);
-            
-            // 可视化：根据距离着色
+
+            // 可视化：根据距离着色 (DWA 安全阈值)
             if (enable_opencv_) {
                 cv::Scalar color;
-                if (dist_to_robot < APF_EMERGENCY_DIST) {
-                    color = cv::Scalar(0, 0, 255);      // 红色：危险
-                } else if (dist_to_robot < APF_SLOWDOWN_DIST) {
-                    color = cv::Scalar(0, 165, 255);    // 橙色：警告
-                } else if (dist_to_robot < APF_INFLUENCE_DIST) {
-                    color = cv::Scalar(0, 255, 255);    // 黄色：影响范围内
+                if (dist_to_robot < DWA_EMERGENCY_DIST) {
+                    color = cv::Scalar(0, 0, 255);      // 红色：否决距离
+                } else if (dist_to_robot < DWA_SAFE_DIST) {
+                    color = cv::Scalar(0, 165, 255);    // 橙色：安全距离内
                 } else {
                     color = cv::Scalar(100, 100, 100);  // 灰色：安全
                 }
                 cv::circle(image, toPixel(point_x, point_y), 2, color, -1, cv::LINE_AA);
             }
-            
-            // 更新最近障碍距离（排除机器人框架区域）
+
+            // 排除机器人框架内的点，不作为障碍物
             bool in_robot_frame = (point_x > -ROBOT_FRAME_BACK && point_x < ROBOT_FRAME_FRONT &&
                                    point_y > -ROBOT_FRAME_RIGHT && point_y < ROBOT_FRAME_LEFT);
-            
-            if (!in_robot_frame && dist_to_robot < min_obstacle_dist) {
-                min_obstacle_dist = dist_to_robot;
-            }
-            
-            // 势场法：计算排斥力（排除机器人框架区域，只考虑前方和侧方障碍）
-            if (!in_robot_frame && dist_to_robot < APF_INFLUENCE_DIST && point_x > -0.1) {
-                double force = APF_REPULSE_GAIN * (1.0 / dist_to_robot - 1.0 / APF_INFLUENCE_DIST) 
-                               / (dist_to_robot * dist_to_robot);
-                repulse_x -= force * point_x / dist_to_robot;
-                repulse_y -= force * point_y / dist_to_robot;
-            }
-            
-            // 排除机器人框架内的点，不参与目标质心、路径障碍计算，也不广播到Web
             if (in_robot_frame) continue;
-            
-            // 只有非机器人框架内的点才加入广播列表
+
             points.emplace_back(point_x, point_y);
-            
-            double dist_to_target_center = std::sqrt(pow(point_x - target_x, 2) + pow(point_y - target_y, 2));
-            
-            if (dist_to_target_center < TARGET_RADIUS) {
-                centroid_x += point_x;
-                centroid_y += point_y;
-                points_in_target_count++;
-                continue;
-            }
-            
-            if (target_vec_len > 1e-6) {
-                double proj_x = (point_x * target_vec_x + point_y * target_vec_y) / target_vec_len;
-                double proj_y = (point_x * -target_vec_y + point_y * target_vec_x) / target_vec_len;
-                
-                if (proj_x >= 0 && proj_x <= target_vec_len && std::abs(proj_y) <= RECTANGLE_WIDTH / 2.0) {
-                    if (enable_opencv_) {
-                        if (proj_y > 0) {
-                            cv::line(image, robot_center_pixel_, toPixel(point_x, point_y), cv::Scalar(255, 255, 0), 1, cv::LINE_AA);
-                        } else {
-                            cv::line(image, robot_center_pixel_, toPixel(point_x, point_y), cv::Scalar(100, 100, 255), 1, cv::LINE_AA);
-                        }
-                    }
-                    
-                    if (proj_y > 0 && proj_y > left_y_min) {
-                        left_y_min = proj_y;
-                    } else if (proj_y <= 0 && proj_y < right_y_min) {
-                        right_y_min = proj_y;
-                    }
-                }
-            }
         }
-        
-        // 限制排斥力幅度
-        double repulse_mag = std::sqrt(repulse_x * repulse_x + repulse_y * repulse_y);
-        if (repulse_mag > 1.0) {
-            repulse_x /= repulse_mag;
-            repulse_y /= repulse_mag;
-        }
-        
+
         // 更新点云缓存
         state_.setPoints(std::move(points));
-        
-        // 更新目标位置为质心（可选卡尔曼滤波平滑）
-        // if (points_in_target_count > 0) {
-        //     double raw_x = centroid_x / points_in_target_count;
-        //     double raw_y = centroid_y / points_in_target_count;
-            
-        //     if (enable_kalman_) {
-        //         double filtered_x, filtered_y;
-        //         kalman_.update(raw_x, raw_y, filtered_x, filtered_y);
-        //         state_.setTarget(filtered_x, filtered_y);
-        //     } else {
-        //         state_.setTarget(raw_x, raw_y);
-        //     }
-        // }
-        
+
+        // 获取当前速度
+        double cur_vx, cur_vy, cur_wz;
+        state_.getVelocity(cur_vx, cur_vy, cur_wz);
+
+        // 从缓存读取障碍点
+        std::vector<std::pair<double, double>> obstacles = state_.getPoints();
+
         // 计算速度
         geometry_msgs::msg::Twist cmd_vel_msg;
         int mode = state_.control_mode.load();
-        
+
         if (mode == MODE_DIRECT) {
             double vx, vy, wz;
             state_.getDirectCmd(vx, vy, wz);
@@ -273,9 +200,11 @@ public:
             cmd_vel_msg.angular.z = wz;
         }
         else if (mode == MODE_FOLLOW) {
-            calculateFollowVelocity(cmd_vel_msg, target_x, target_y, 
-                                    left_y_min, right_y_min,
-                                    repulse_x, repulse_y, min_obstacle_dist);
+            DWAPlanner::Sample best = dwa_planner_.plan(
+                obstacles, target_x, target_y, cur_vx, cur_vy, cur_wz);
+            cmd_vel_msg.linear.x = best.vx;
+            cmd_vel_msg.linear.y = best.vy;
+            cmd_vel_msg.angular.z = best.wz;
         }
         
         // 缓存速度
@@ -306,6 +235,7 @@ private:
     bool enable_opencv_ = false;
     bool enable_kalman_ = false;
     KalmanFilter2D kalman_;
+    DWAPlanner dwa_planner_;
     VelocityCallback velocity_callback_;
     DataBroadcastCallback data_broadcast_callback_;
     
@@ -347,67 +277,6 @@ private:
         int target_radius_px = static_cast<int>(TARGET_RADIUS * METERS_TO_PIXELS);
         cv::circle(image, target_center_px, target_radius_px, cv::Scalar(255, 0, 255), 1, cv::LINE_AA);
         cv::line(image, robot_center_pixel_, target_center_px, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
-    }
-    
-    // 计算跟随速度（带势场避障）
-    void calculateFollowVelocity(geometry_msgs::msg::Twist& cmd, double target_x, double target_y,
-                                  double left_y_min, double right_y_min,
-                                  double repulse_x, double repulse_y, double min_obstacle_dist) {
-        // 紧急停止检查
-        if (min_obstacle_dist < APF_EMERGENCY_DIST) {
-            cmd.linear.x = 0.0;
-            cmd.linear.y = 0.0;
-            cmd.angular.z = 0.0;
-            return;
-        }
-        
-        // 前后运动控制（带死区）
-        double dist_error = target_x - FOLLOW_DIST;
-        if (std::abs(dist_error) < 0.05) {
-            cmd.linear.x = 0.0;
-        } else {
-            cmd.linear.x = dist_error * LINEAR_SCALE_FACTOR;
-            if (cmd.linear.x < 0) cmd.linear.x *= 0.8;
-            
-            double min_speed = 0.06;
-            if (std::abs(cmd.linear.x) < min_speed) {
-                cmd.linear.x = (cmd.linear.x > 0) ? min_speed : -min_speed;
-            }
-        }
-        
-        // 旋转运动控制（带死区）
-        double angle_error = atan2(target_y, target_x);
-        if (std::abs(angle_error) < 0.1) {
-            cmd.angular.z = 0.0;
-        } else {
-            cmd.angular.z = angle_error * ANGULAR_SCALE_FACTOR;
-        }
-        
-        // 横向运动控制（带死区）
-        double lateral_error = -(left_y_min + right_y_min);
-        if (std::abs(lateral_error) > 1.0) lateral_error = 0.0;
-        if (std::abs(lateral_error) < 0.03) {
-            cmd.linear.y = 0.0;
-        } else {
-            cmd.linear.y = lateral_error * LINEAR_Y_SCALE_FACTOR;
-        }
-        
-        // 融合势场排斥力
-        cmd.linear.x += repulse_x;
-        cmd.linear.y += repulse_y;
-        
-        // 接近障碍时减速
-        if (min_obstacle_dist < APF_SLOWDOWN_DIST) {
-            double slowdown_factor = (min_obstacle_dist - APF_EMERGENCY_DIST) 
-                                   / (APF_SLOWDOWN_DIST - APF_EMERGENCY_DIST);
-            slowdown_factor = std::clamp(slowdown_factor, 0.1, 1.0);
-            cmd.linear.x *= slowdown_factor;
-        }
-        
-        // 限制速度
-        cmd.linear.x = std::clamp(cmd.linear.x, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
-        cmd.linear.y = std::clamp(cmd.linear.y, -MAX_LINEAR_SPEED, MAX_LINEAR_SPEED);
-        cmd.angular.z = std::clamp(cmd.angular.z, -MAX_ANGULAR_SPEED, MAX_ANGULAR_SPEED);
     }
     
     // 发布速度

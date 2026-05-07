@@ -24,11 +24,36 @@ constexpr double RECTANGLE_WIDTH = 0.35;      // 矩形宽度 (米)
 constexpr double MAX_LINEAR_SPEED = 1.0;
 constexpr double MAX_ANGULAR_SPEED = 1.0;
 
-// 势场法避障参数
-constexpr double APF_INFLUENCE_DIST = 0.25;   // 障碍物影响距离 (米)
-constexpr double APF_REPULSE_GAIN = 0.01;     // 排斥力增益
-constexpr double APF_EMERGENCY_DIST = 0.2;    // 紧急停止距离 (米)
-constexpr double APF_SLOWDOWN_DIST = 0.25;    // 减速距离 (米)
+// DWA (Dynamic Window Approach) 避障参数
+constexpr double DWA_SIM_TIME = 1.5;           // 前向仿真时长 (s)
+constexpr double DWA_DT = 0.1;                 // 仿真步长 (s)
+constexpr int DWA_VX_SAMPLES = 15;             // vx 采样数
+constexpr int DWA_VY_SAMPLES = 5;              // vy 采样数
+constexpr int DWA_WZ_SAMPLES = 7;              // wz 采样数
+
+// DWA 速度约束
+constexpr double DWA_MIN_VX = -0.3;            // vx 下限 (m/s)
+constexpr double DWA_MAX_VX = 1.0;             // vx 上限 (m/s)
+constexpr double DWA_MIN_VY = -0.3;            // vy 下限 (m/s)
+constexpr double DWA_MAX_VY = 0.3;             // vy 上限 (m/s)
+constexpr double DWA_MIN_WZ = -1.0;            // wz 下限 (rad/s)
+constexpr double DWA_MAX_WZ = 1.0;             // wz 上限 (rad/s)
+
+// DWA 加速度约束
+constexpr double DWA_ACC_VX = 1.0;             // vx 加速度 (m/s²)
+constexpr double DWA_ACC_VY = 0.5;             // vy 加速度 (m/s²)
+constexpr double DWA_ACC_WZ = 2.0;             // wz 角加速度 (rad/s²)
+
+// DWA 评分权重
+constexpr double DWA_WEIGHT_HEADING = 0.35;     // 朝向权重
+constexpr double DWA_WEIGHT_CLEARANCE = 0.35;   // 安全距离权重
+constexpr double DWA_WEIGHT_VELOCITY = 0.15;    // 速度权重
+constexpr double DWA_WEIGHT_TARGET_DIST = 0.15; // 目标距离权重
+
+// DWA 安全阈值
+constexpr double DWA_EMERGENCY_DIST = 0.15;     // 否决距离 (m)
+constexpr double DWA_SAFE_DIST = 0.4;           // 安全距离 (m)
+constexpr double DWA_MAX_TARGET_RANGE = 3.0;    // 最大目标距离 (m)
 
 // 机器人框架排除区域（雷达可能扫描到的内部支架）
 constexpr double ROBOT_FRAME_FRONT = 0.15;    // 前方排除范围 (米)
