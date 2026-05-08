@@ -36,7 +36,7 @@ constexpr int DWA_WZ_SAMPLES = 7;              // wz 采样数
 
 // DWA 速度约束
 constexpr double DWA_MIN_VX = -0.3;            // vx 下限 (m/s)
-constexpr double DWA_MAX_VX = 0.6;             // vx 上限 (m/s)
+constexpr double DWA_MAX_VX = 0.45;            // vx 上限 (m/s)
 constexpr double DWA_MIN_VY = -0.3;            // vy 下限 (m/s)
 constexpr double DWA_MAX_VY = 0.3;             // vy 上限 (m/s)
 constexpr double DWA_MIN_WZ = -1.0;            // wz 下限 (rad/s)
