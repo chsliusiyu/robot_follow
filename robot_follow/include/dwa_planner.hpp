@@ -96,9 +96,10 @@ private:
     {
         double target_angle = std::atan2(target_y, target_x);
 
-        // 前向仿真轨迹，同时计算 clearance
+        // 前向仿真轨迹，同时计算 clearance 和障碍密度
         double x = 0.0, y = 0.0, theta = 0.0;
         double min_clearance = std::numeric_limits<double>::max();
+        double density_penalty = 0.0;
 
         for (int k = 0; k < num_steps; ++k) {
             // 欧拉积分
@@ -106,13 +107,16 @@ private:
             y += (vx * std::sin(theta) + vy * std::cos(theta)) * DWA_DT;
             theta += wz * DWA_DT;
 
-            // 计算当前位置到所有障碍的最近距离
             double step_min_dist = std::numeric_limits<double>::max();
             for (const auto& obs : obstacles) {
                 double dx = x - obs.first;
                 double dy = y - obs.second;
-                double dist = std::sqrt(dx * dx + dy * dy);
+                double d2 = dx * dx + dy * dy;
+                double dist = std::sqrt(d2);
                 if (dist < step_min_dist) step_min_dist = dist;
+                if (dist < DWA_SAFE_DIST) {
+                    density_penalty += std::exp(-d2 / (DWA_SAFE_DIST * DWA_SAFE_DIST));
+                }
             }
             if (step_min_dist < min_clearance) min_clearance = step_min_dist;
 
@@ -137,19 +141,26 @@ private:
         double angle_error = std::abs(std::atan2(pred_target_y, pred_target_x));
         double heading_score = 1.0 - angle_error / M_PI;
 
-        // 评分 2: 安全距离 —— 轨迹上最近障碍距离
-        double clearance_score = std::min(1.0, min_clearance / DWA_SAFE_DIST);
+        // 评分 2: 安全距离 —— 轨迹上最近障碍距离（非线性指数衰减，近距离惩罚剧烈）
+        double clearance_score = 1.0 - std::exp(-3.0 * min_clearance / DWA_SAFE_DIST);
 
-        // 评分 3: 速度 —— 沿目标方向的速度投影
+        // 障碍密度罚分：轨迹周围障碍物越多扣分越多
+        double density_score = 1.0 / (1.0 + density_penalty);
+
+        // 评分 3: 速度 —— 沿目标方向的速度投影，带距离衰减
+        double target_dist = std::sqrt(target_x * target_x + target_y * target_y);
+        double dist_factor = std::clamp(
+            (target_dist - FOLLOW_DIST) / (DWA_MAX_TARGET_RANGE - FOLLOW_DIST) * 0.8 + 0.2,
+            0.2, 1.0);
         double vel_proj = vx * std::cos(target_angle) + vy * std::sin(target_angle);
-        double velocity_score = std::max(0.0, vel_proj) / DWA_MAX_VX;
+        double velocity_score = std::max(0.0, vel_proj) / DWA_MAX_VX * dist_factor;
 
         // 评分 4: 目标距离 —— 终点与理想跟随距离的偏差
         double dist_error = std::abs(pred_target_dist - FOLLOW_DIST);
         double target_dist_score = std::max(0.0, 1.0 - dist_error / FOLLOW_DIST);
 
         return DWA_WEIGHT_HEADING   * heading_score +
-               DWA_WEIGHT_CLEARANCE * clearance_score +
+               DWA_WEIGHT_CLEARANCE * (0.7 * clearance_score + 0.3 * density_score) +
                DWA_WEIGHT_VELOCITY  * velocity_score +
                DWA_WEIGHT_TARGET_DIST * target_dist_score;
     }
