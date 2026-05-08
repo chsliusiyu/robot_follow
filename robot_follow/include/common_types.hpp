@@ -36,7 +36,7 @@ constexpr int DWA_WZ_SAMPLES = 7;              // wz 采样数
 
 // DWA 速度约束
 constexpr double DWA_MIN_VX = -0.3;            // vx 下限 (m/s)
-constexpr double DWA_MAX_VX = 0.6;             // vx 上限 (m/s)
+constexpr double DWA_MAX_VX = 0.45;            // vx 上限 (m/s)
 constexpr double DWA_MIN_VY = -0.3;            // vy 下限 (m/s)
 constexpr double DWA_MAX_VY = 0.3;             // vy 上限 (m/s)
 constexpr double DWA_MIN_WZ = -1.0;            // wz 下限 (rad/s)
@@ -54,9 +54,10 @@ constexpr double DWA_WEIGHT_VELOCITY = 0.10;    // 速度权重
 constexpr double DWA_WEIGHT_TARGET_DIST = 0.15; // 目标距离权重
 
 // DWA 安全阈值
-constexpr double DWA_EMERGENCY_DIST = 0.25;     // 否决距离 (m)
-constexpr double DWA_SAFE_DIST = 0.5;           // 安全距离 (m)
-constexpr double DWA_MAX_TARGET_RANGE = 3.0;    // 最大目标距离 (m)
+constexpr double DWA_ROBOT_RADIUS = 0.25;        // 机器人等效半径 (m)（半对角线，点模型→实体修正）
+constexpr double DWA_EMERGENCY_DIST = 0.25;      // 否决距离 (m)
+constexpr double DWA_SAFE_DIST = 0.5;            // 安全距离 (m)
+constexpr double DWA_MAX_TARGET_RANGE = 3.0;     // 最大目标距离 (m)
 
 // 机器人框架排除区域（雷达可能扫描到的内部支架）
 constexpr double ROBOT_FRAME_FRONT = 0.15;    // 前方排除范围 (米)
