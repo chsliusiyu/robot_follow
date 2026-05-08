@@ -8,7 +8,7 @@ def generate_launch_description():
     # 声明启动参数（可通过命令行覆盖，方便灵活配置）
     serial_port_arg = DeclareLaunchArgument(
         'serial_port',
-        default_value='/dev/ttyACM1',
+        default_value='/dev/ttyACM0',
         description='uwb rader dev'
     )
 
