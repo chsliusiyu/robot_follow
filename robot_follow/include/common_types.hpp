@@ -48,7 +48,7 @@ constexpr double NMPC_ACC_WZ = 2.0;            // wz 角加速度 (rad/s²)
 
 // NMPC 代价权重
 constexpr double NMPC_W_TRACK = 5.0;           // 终端跟踪误差权重
-constexpr double NMPC_W_HEAD = 3.0;            // 终端朝向误差权重
+constexpr double NMPC_W_HEAD = 1.0;            // 终端朝向误差权重
 constexpr double NMPC_W_OBS = 10.0;            // 障碍物排斥权重
 constexpr double NMPC_W_SMOOTH = 2.0;          // 控制序列平滑权重
 constexpr double NMPC_W_CTRL = 0.1;            // 控制代价权重
