@@ -216,11 +216,6 @@ public:
                 cmd_vel_msg.linear.x = 0.0;
                 cmd_vel_msg.linear.y = 0.0;
                 cmd_vel_msg.angular.z = UWB_SEARCH_WZ;
-            } else if (uwb_elapsed > 0.05) {
-                // 信号刚丢失：原地等待，看目标是否自己回来
-                cmd_vel_msg.linear.x = 0.0;
-                cmd_vel_msg.linear.y = 0.0;
-                cmd_vel_msg.angular.z = 0.0;
             } else {
                 DWAPlanner::Sample best = dwa_planner_.plan(
                     obstacles, target_x, target_y, cur_vx, cur_vy, cur_wz);
