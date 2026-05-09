@@ -214,21 +214,32 @@ public:
                 double cur_vx, cur_vy, cur_wz;
                 state_.getVelocity(cur_vx, cur_vy, cur_wz);
 
+                double target_dist = std::sqrt(target_x * target_x + target_y * target_y);
+
+                // P 跟随层：计算期望速度
+                double des_vx = (target_dist - FOLLOW_DIST) * P_FORWARD_GAIN;
+                double des_vy = target_y * P_LATERAL_GAIN;
+                double des_wz = std::atan2(target_y, target_x) * P_ANGULAR_GAIN;
+
+                // 到达目标处停止移动，但保持朝向对齐
+                if (std::abs(target_dist - FOLLOW_DIST) < 0.1) {
+                    des_vx = 0.0;
+                    des_vy = 0.0;
+                }
+
+                // 限幅
+                des_vx = std::clamp(des_vx, -NMPC_MAX_VX, NMPC_MAX_VX);
+                des_vy = std::clamp(des_vy, -NMPC_MAX_VY, NMPC_MAX_VY);
+                des_wz = std::clamp(des_wz, -NMPC_MAX_WZ, NMPC_MAX_WZ);
+
+                // NMPC 避障层：尽量接近 P 控制输出同时避开障碍
                 auto obstacles = state_.getPoints();
-                auto result = nmpc_planner_.solve(obstacles, target_x, target_y, cur_vx, cur_vy, cur_wz);
+                auto result = nmpc_planner_.solve(
+                    obstacles, cur_vx, cur_vy, cur_wz, des_vx, des_vy, des_wz);
                 cmd_vel_msg.linear.x = result.vx;
                 cmd_vel_msg.linear.y = result.vy;
                 cmd_vel_msg.angular.z = result.wz;
             }
-        }
-
-        // 到达目标处：停止移动，只做朝向对齐
-        double target_dist = std::sqrt(target_x * target_x + target_y * target_y);
-        if (std::abs(target_dist - FOLLOW_DIST) < 0.1) {
-            cmd_vel_msg.linear.x = 0.0;
-            cmd_vel_msg.linear.y = 0.0;
-            double angle_to_target = std::atan2(target_y, target_x);
-            cmd_vel_msg.angular.z = std::clamp(angle_to_target * 0.6, -0.4, 0.4);
         }
 
         // 缓存速度

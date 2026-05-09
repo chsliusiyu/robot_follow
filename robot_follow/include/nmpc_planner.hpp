@@ -26,25 +26,20 @@ public:
     void resetWarmstart() { has_warmstart_ = false; }
 
     /**
-     * @brief 求解 NMPC，返回最优第一步控制
-     * @param obstacles  障碍点云（机器人坐标系，已过滤自身框架）
-     * @param target_x   目标 X（机器人坐标系）
-     * @param target_y   目标 Y（机器人坐标系）
+     * @brief 求解 NMPC，返回避障后的最优第一步控制
+     * @param obstacles  障碍点云（机器人坐标系，已过滤自身框架和遮罩）
      * @param cur_vx     当前速度 Vx
      * @param cur_vy     当前速度 Vy
      * @param cur_wz     当前速度 Wz
-     * @return 最优速度指令 [vx, vy, wz]
+     * @param des_vx     P 跟随层期望 Vx
+     * @param des_vy     P 跟随层期望 Vy
+     * @param des_wz     P 跟随层期望 Wz
+     * @return 避障后的最优速度指令 [vx, vy, wz]
      */
     Control solve(const std::vector<std::pair<double, double>>& obstacles,
-                  double target_x, double target_y,
-                  double cur_vx, double cur_vy, double cur_wz)
+                  double cur_vx, double cur_vy, double cur_wz,
+                  double des_vx, double des_vy, double des_wz)
     {
-        double target_dist = std::sqrt(target_x * target_x + target_y * target_y);
-        if (target_dist < 0.01 || target_dist > 3.0) {
-            has_warmstart_ = false;
-            return {0.0, 0.0, 0.0};
-        }
-
         int N = NMPC_HORIZON;
         double dt = NMPC_DT;
 
@@ -86,7 +81,7 @@ public:
                 ys[k + 1]     = ys[k] + (U[k].vx * s + U[k].vy * c) * dt;
                 thetas[k + 1] = thetas[k] + U[k].wz * dt;
 
-                // 阶段障碍代价 + 紧急距离检测
+                // 障碍代价 + 紧急距离检测
                 double obs_cost = 0.0;
                 for (const auto& o : near_obs) {
                     double dx = xs[k + 1] - o.first;
@@ -108,6 +103,14 @@ public:
 
                 // 控制代价
                 cost += NMPC_W_CTRL * (U[k].vx * U[k].vx + U[k].vy * U[k].vy + U[k].wz * U[k].wz);
+
+                // 偏离代价：第一步尽量接近 P 控制输出
+                if (k == 0) {
+                    double dvx0 = U[0].vx - des_vx;
+                    double dvy0 = U[0].vy - des_vy;
+                    double dwz0 = U[0].wz - des_wz;
+                    cost += NMPC_W_DEVIATION * (dvx0 * dvx0 + dvy0 * dvy0 + dwz0 * dwz0);
+                }
             }
 
             // 紧急否决
@@ -115,38 +118,13 @@ public:
                 cost = std::numeric_limits<double>::max();
             }
 
-            // 终端代价
-            double tx_end = (target_x - xs[N]) * std::cos(thetas[N]) +
-                            (target_y - ys[N]) * std::sin(thetas[N]);
-            double ty_end = -(target_x - xs[N]) * std::sin(thetas[N]) +
-                            (target_y - ys[N]) * std::cos(thetas[N]);
-            double dist_end = std::sqrt(tx_end * tx_end + ty_end * ty_end);
-            double angle_end = std::abs(std::atan2(ty_end, tx_end));
-            double dist_err = dist_end - FOLLOW_DIST;
-            cost += NMPC_W_TRACK * dist_err * dist_err;
-            cost += NMPC_W_HEAD * angle_end * angle_end;
-
             if (cost < best_cost && cost < 1e9) {
                 best_cost = cost;
                 best_U = U;
             }
 
-            // 3b. 伴随法反向传播计算梯度
-            // 终端伴随 λ_N = ∂φ/∂z_N
-            double lx, ly, lt;
-            if (dist_end > 0.01) {
-                double dphi_dtx = 2.0 * NMPC_W_TRACK * dist_err * tx_end / dist_end
-                                - 2.0 * NMPC_W_HEAD * angle_end * ty_end / (dist_end * dist_end);
-                double dphi_dty = 2.0 * NMPC_W_TRACK * dist_err * ty_end / dist_end
-                                + 2.0 * NMPC_W_HEAD * angle_end * tx_end / (dist_end * dist_end);
-
-                double cN = std::cos(thetas[N]), sN = std::sin(thetas[N]);
-                lx = dphi_dtx * (-cN) + dphi_dty * sN;
-                ly = dphi_dtx * (-sN) + dphi_dty * (-cN);
-                lt = dphi_dtx * ty_end + dphi_dty * (-tx_end);
-            } else {
-                lx = 0.0; ly = 0.0; lt = 0.0;
-            }
+            // 3b. 伴随法反向传播计算梯度（无终端代价，λ_N = 0）
+            double lx = 0.0, ly = 0.0, lt = 0.0;
 
             // 反向传播
             for (int k = N - 1; k >= 0; --k) {
@@ -195,6 +173,13 @@ public:
                     g_wz -= 2.0 * NMPC_W_SMOOTH * (U[k + 1].wz - U[k].wz);
                 }
 
+                // 偏离代价梯度（仅第一步）
+                if (k == 0) {
+                    g_vx += 2.0 * NMPC_W_DEVIATION * (U[0].vx - des_vx);
+                    g_vy += 2.0 * NMPC_W_DEVIATION * (U[0].vy - des_vy);
+                    g_wz += 2.0 * NMPC_W_DEVIATION * (U[0].wz - des_wz);
+                }
+
                 // 控制代价梯度
                 g_vx += 2.0 * NMPC_W_CTRL * U[k].vx;
                 g_vy += 2.0 * NMPC_W_CTRL * U[k].vy;
@@ -222,14 +207,7 @@ public:
             step = std::max(NMPC_MIN_STEP, step * 0.98);
         }
 
-        // 4. 距离自适应速度：接近目标时降低最高速度
-        double dist_factor = std::clamp(
-            (target_dist - FOLLOW_DIST) / (3.0 - FOLLOW_DIST) * 0.8 + 0.2,
-            0.1, 1.0);
-        double max_vx_adaptive = NMPC_MAX_VX * dist_factor;
-        best_U[0].vx = std::clamp(best_U[0].vx, -max_vx_adaptive, max_vx_adaptive);
-
-        // 5. 保存 warm start
+        // 4. 保存 warm start
         prev_U_ = best_U;
         has_warmstart_ = true;
 

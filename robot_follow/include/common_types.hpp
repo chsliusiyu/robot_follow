@@ -50,9 +50,13 @@ constexpr double NMPC_ACC_VX = 0.5;            // vx 加速度 (m/s²)
 constexpr double NMPC_ACC_VY = 0.5;            // vy 加速度 (m/s²)
 constexpr double NMPC_ACC_WZ = 2.0;            // wz 角加速度 (rad/s²)
 
-// NMPC 代价权重
-constexpr double NMPC_W_TRACK = 5.0;           // 终端跟踪误差权重
-constexpr double NMPC_W_HEAD = 1.5;            // 终端朝向误差权重
+// P 跟随层增益（lidar_tracker 中计算期望速度）
+constexpr double P_FORWARD_GAIN = 0.25;         // 前后跟随 P 增益
+constexpr double P_LATERAL_GAIN = 0.5;          // 横向跟随 P 增益
+constexpr double P_ANGULAR_GAIN = 0.6;          // 朝向跟随 P 增益
+
+// NMPC 避障层代价权重
+constexpr double NMPC_W_DEVIATION = 5.0;       // 偏离 P 控制输出的权重
 constexpr double NMPC_W_OBS = 10.0;            // 障碍物排斥权重
 constexpr double NMPC_W_SMOOTH = 2.0;          // 控制序列平滑权重
 constexpr double NMPC_W_CTRL = 0.1;            // 控制代价权重
