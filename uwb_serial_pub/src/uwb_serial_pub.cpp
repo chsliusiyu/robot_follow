@@ -252,8 +252,7 @@ private:
     //RCLCPP_INFO(this->get_logger(), " x : %.2f   y : %.2f ", x ,y);
     if(RSSIFLAG)
       publish_point(x,y);
-    else
-      publish_point(0.7,0.3);
+    // 信号丢失时不发布，由上层超时检测触发搜索旋转
   }
   
 

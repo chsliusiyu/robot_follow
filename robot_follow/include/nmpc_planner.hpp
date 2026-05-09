@@ -23,6 +23,8 @@ public:
         double vx, vy, wz;
     };
 
+    void resetWarmstart() { has_warmstart_ = false; }
+
     /**
      * @brief 求解 NMPC，返回最优第一步控制
      * @param obstacles  障碍点云（机器人坐标系，已过滤自身框架）
