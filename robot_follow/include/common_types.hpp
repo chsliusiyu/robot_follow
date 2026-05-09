@@ -58,7 +58,7 @@ constexpr double DWA_WEIGHT_VELOCITY = 0.10;    // 速度权重
 constexpr double DWA_WEIGHT_TARGET_DIST = 0.15; // 目标距离权重
 
 // DWA 安全阈值
-constexpr double DWA_EMERGENCY_DIST = 0.25;     // 否决距离 (m)
+constexpr double DWA_EMERGENCY_DIST = 0.35;     // 否决距离 (m)
 constexpr double DWA_SAFE_DIST = 0.5;           // 安全距离 (m)
 constexpr double DWA_MAX_TARGET_RANGE = 3.0;    // 最大目标距离 (m)
 

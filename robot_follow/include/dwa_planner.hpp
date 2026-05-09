@@ -68,6 +68,20 @@ public:
             }
         }
 
+        // 卡死恢复：最优轨迹被否决时，尝试横向移动找空隙
+        if (best.vx < 0.05 && best.vy < 0.05 && std::abs(best.wz) < 0.05) {
+            double left_score = scoreSample(0.05,  0.15, 0.0, obstacles,
+                                            target_x, target_y, num_steps);
+            double right_score = scoreSample(0.05, -0.15, 0.0, obstacles,
+                                             target_x, target_y, num_steps);
+            if (left_score > best.score) {
+                best = {0.05, 0.15, 0.0, left_score};
+            }
+            if (right_score > best.score) {
+                best = {0.05, -0.15, 0.0, right_score};
+            }
+        }
+
         return best;
     }
 

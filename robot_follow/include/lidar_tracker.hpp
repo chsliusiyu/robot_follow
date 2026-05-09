@@ -208,13 +208,19 @@ public:
             cmd_vel_msg.angular.z = wz;
         }
         else if (mode == MODE_FOLLOW) {
-            // UWB 信号丢失超时检测：原地旋转搜索信号
+            // UWB 信号丢失检测
             auto now = std::chrono::steady_clock::now();
             double uwb_elapsed = std::chrono::duration<double>(now - last_uwb_time_).count();
             if (uwb_elapsed > UWB_TIMEOUT_S) {
+                // 超时：原地旋转搜索信号
                 cmd_vel_msg.linear.x = 0.0;
                 cmd_vel_msg.linear.y = 0.0;
                 cmd_vel_msg.angular.z = UWB_SEARCH_WZ;
+            } else if (uwb_elapsed > 0.05) {
+                // 信号刚丢失：原地等待，看目标是否自己回来
+                cmd_vel_msg.linear.x = 0.0;
+                cmd_vel_msg.linear.y = 0.0;
+                cmd_vel_msg.angular.z = 0.0;
             } else {
                 DWAPlanner::Sample best = dwa_planner_.plan(
                     obstacles, target_x, target_y, cur_vx, cur_vy, cur_wz);
