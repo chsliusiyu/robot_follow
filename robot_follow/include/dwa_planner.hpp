@@ -164,8 +164,8 @@ private:
         // 评分 3: 速度 —— 沿目标方向的速度投影，带距离衰减
         double target_dist = std::sqrt(target_x * target_x + target_y * target_y);
         double dist_factor = std::clamp(
-            (target_dist - FOLLOW_DIST) / (DWA_MAX_TARGET_RANGE - FOLLOW_DIST) * 0.8 + 0.2,
-            0.2, 1.0);
+            (target_dist - FOLLOW_DIST) / (DWA_MAX_TARGET_RANGE - FOLLOW_DIST) * 0.5 + 0.15,
+            0.15, 1.0);
         double vel_proj = vx * std::cos(target_angle) + vy * std::sin(target_angle);
         double velocity_score = std::max(0.0, vel_proj) / DWA_MAX_VX * dist_factor;
 
