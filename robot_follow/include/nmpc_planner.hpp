@@ -225,7 +225,7 @@ public:
         // 4. 距离自适应速度：接近目标时降低最高速度
         double dist_factor = std::clamp(
             (target_dist - FOLLOW_DIST) / (3.0 - FOLLOW_DIST) * 0.8 + 0.2,
-            0.2, 1.0);
+            0.1, 1.0);
         double max_vx_adaptive = NMPC_MAX_VX * dist_factor;
         best_U[0].vx = std::clamp(best_U[0].vx, -max_vx_adaptive, max_vx_adaptive);
 

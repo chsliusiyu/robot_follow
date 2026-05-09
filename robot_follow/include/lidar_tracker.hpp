@@ -221,10 +221,19 @@ public:
                 cmd_vel_msg.angular.z = result.wz;
             }
         }
-        
+
+        // 到达目标处：停止移动，只做朝向对齐
+        double target_dist = std::sqrt(target_x * target_x + target_y * target_y);
+        if (std::abs(target_dist - FOLLOW_DIST) < 0.1) {
+            cmd_vel_msg.linear.x = 0.0;
+            cmd_vel_msg.linear.y = 0.0;
+            double angle_to_target = std::atan2(target_y, target_x);
+            cmd_vel_msg.angular.z = std::clamp(angle_to_target * 0.6, -0.4, 0.4);
+        }
+
         // 缓存速度
         state_.setVelocity(cmd_vel_msg.linear.x, cmd_vel_msg.linear.y, cmd_vel_msg.angular.z);
-        
+
         // 发布速度
         publishVelocity(cmd_vel_msg, mode);
         
