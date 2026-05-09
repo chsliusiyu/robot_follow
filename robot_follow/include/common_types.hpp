@@ -20,6 +20,9 @@ constexpr double ANGULAR_SCALE_FACTOR = 1.0;  // 旋转运动速度比例系数
 constexpr double LINEAR_Y_SCALE_FACTOR = 1.0; // 左右运动速度比例系数
 constexpr double RECTANGLE_WIDTH = 0.35;      // 矩形宽度 (米)
 
+// 目标遮罩 — UWB目标周围的LiDAR点视为被跟随者，不作为障碍物
+constexpr double TARGET_MASK_RADIUS = 0.45;    // 目标周围排除半径 (米)
+
 // 速度限制
 constexpr double MAX_LINEAR_SPEED = 1.0;
 constexpr double MAX_ANGULAR_SPEED = 1.0;
@@ -32,14 +35,14 @@ constexpr double NMPC_CONVERGE_TOL = 1e-3;     // 梯度范数收敛容差
 
 // NMPC 速度约束
 constexpr double NMPC_MIN_VX = -0.3;           // vx 下限 (m/s)
-constexpr double NMPC_MAX_VX = 1.0;            // vx 上限 (m/s)
+constexpr double NMPC_MAX_VX = 0.45;            // vx 上限 (m/s)
 constexpr double NMPC_MIN_VY = -0.3;           // vy 下限 (m/s)
 constexpr double NMPC_MAX_VY = 0.3;            // vy 上限 (m/s)
 constexpr double NMPC_MIN_WZ = -1.0;           // wz 下限 (rad/s)
 constexpr double NMPC_MAX_WZ = 1.0;            // wz 上限 (rad/s)
 
 // NMPC 加速度约束
-constexpr double NMPC_ACC_VX = 1.0;            // vx 加速度 (m/s²)
+constexpr double NMPC_ACC_VX = 0.5;            // vx 加速度 (m/s²)
 constexpr double NMPC_ACC_VY = 0.5;            // vy 加速度 (m/s²)
 constexpr double NMPC_ACC_WZ = 2.0;            // wz 角加速度 (rad/s²)
 
@@ -53,7 +56,7 @@ constexpr double NMPC_W_CTRL = 0.1;            // 控制代价权重
 // NMPC 障碍物惩罚参数
 constexpr double NMPC_OBS_SIGMA = 0.15;        // 指数衰减宽度 (m)
 constexpr double NMPC_OBS_CUTOFF = 0.5;        // 障碍物影响截止距离 (m)
-constexpr double NMPC_EMERGENCY_DIST = 0.12;   // 紧急否决距离 (m)
+constexpr double NMPC_EMERGENCY_DIST = 0.25;   // 紧急否决距离 (m)
 
 // NMPC 优化参数
 constexpr double NMPC_INIT_STEP = 0.02;         // 初始梯度步长

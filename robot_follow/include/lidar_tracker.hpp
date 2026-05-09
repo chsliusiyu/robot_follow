@@ -176,6 +176,12 @@ public:
 
             if (in_robot_frame) continue;
 
+            // 排除UWB目标附近的点 — 这些点来自被跟随者，不应视为障碍物
+            double dist_to_target = std::sqrt(
+                (point_x - target_x) * (point_x - target_x) +
+                (point_y - target_y) * (point_y - target_y));
+            if (dist_to_target < TARGET_MASK_RADIUS) continue;
+
             points.emplace_back(point_x, point_y);
         }
         
