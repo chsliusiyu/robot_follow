@@ -15,6 +15,7 @@
 #include <cmath>
 #include <algorithm>
 #include <functional>
+#include <chrono>
 
 /**
  * @class LidarTracker
@@ -72,8 +73,9 @@ public:
         }
     }
 
-    void processtalker(const geometry_msgs::msg::Point msg) 
+    void processtalker(const geometry_msgs::msg::Point msg)
     {
+        last_uwb_time_ = std::chrono::steady_clock::now();
 
         if (!state_.active.load()) {
             return;
@@ -206,11 +208,20 @@ public:
             cmd_vel_msg.angular.z = wz;
         }
         else if (mode == MODE_FOLLOW) {
-            DWAPlanner::Sample best = dwa_planner_.plan(
-                obstacles, target_x, target_y, cur_vx, cur_vy, cur_wz);
-            cmd_vel_msg.linear.x = best.vx;
-            cmd_vel_msg.linear.y = best.vy;
-            cmd_vel_msg.angular.z = best.wz;
+            // UWB 信号丢失超时检测：原地旋转搜索信号
+            auto now = std::chrono::steady_clock::now();
+            double uwb_elapsed = std::chrono::duration<double>(now - last_uwb_time_).count();
+            if (uwb_elapsed > UWB_TIMEOUT_S) {
+                cmd_vel_msg.linear.x = 0.0;
+                cmd_vel_msg.linear.y = 0.0;
+                cmd_vel_msg.angular.z = UWB_SEARCH_WZ;
+            } else {
+                DWAPlanner::Sample best = dwa_planner_.plan(
+                    obstacles, target_x, target_y, cur_vx, cur_vy, cur_wz);
+                cmd_vel_msg.linear.x = best.vx;
+                cmd_vel_msg.linear.y = best.vy;
+                cmd_vel_msg.angular.z = best.wz;
+            }
         }
         
         // 缓存速度
@@ -242,6 +253,7 @@ private:
     bool enable_kalman_ = false;
     KalmanFilter2D kalman_;
     DWAPlanner dwa_planner_;
+    std::chrono::steady_clock::time_point last_uwb_time_ = std::chrono::steady_clock::now();
     VelocityCallback velocity_callback_;
     DataBroadcastCallback data_broadcast_callback_;
     
