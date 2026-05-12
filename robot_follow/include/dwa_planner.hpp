@@ -14,6 +14,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <cstdio>
 
 class DWAPlanner {
 public:
@@ -70,15 +71,27 @@ public:
 
         // 卡死恢复：最优轨迹被否决时，尝试横向移动找空隙
         if (best.vx < 0.05 && best.vy < 0.05 && std::abs(best.wz) < 0.05) {
+            // 打印最优轨迹的评分分解，帮助诊断卡死原因
+            fprintf(stderr, "\n[DWA] STUCK detected — best sample near zero, printing score breakdown:\n");
+            scoreSample(best.vx, best.vy, best.wz, obstacles,
+                       target_x, target_y, num_steps, true);
+
             double left_score = scoreSample(0.05,  0.15, 0.0, obstacles,
                                             target_x, target_y, num_steps);
             double right_score = scoreSample(0.05, -0.15, 0.0, obstacles,
                                              target_x, target_y, num_steps);
+            fprintf(stderr, "[DWA] Stuck recovery: left_score=%.4f right_score=%.4f best_score=%.4f\n",
+                    left_score, right_score, best.score);
             if (left_score > best.score) {
                 best = {0.05, 0.15, 0.0, left_score};
+                fprintf(stderr, "[DWA] -> Selected LEFT lateral recovery (vy=+0.15)\n");
             }
             if (right_score > best.score) {
                 best = {0.05, -0.15, 0.0, right_score};
+                fprintf(stderr, "[DWA] -> Selected RIGHT lateral recovery (vy=-0.15)\n");
+            }
+            if (left_score <= best.score && right_score <= best.score) {
+                fprintf(stderr, "[DWA] -> Lateral recovery FAILED, staying at zero\n");
             }
         }
 
@@ -106,7 +119,8 @@ private:
 
     double scoreSample(double vx, double vy, double wz,
                        const std::vector<std::pair<double, double>>& obstacles,
-                       double target_x, double target_y, int num_steps)
+                       double target_x, double target_y, int num_steps,
+                       bool debug = false)
     {
         double target_angle = std::atan2(target_y, target_x);
 
@@ -136,6 +150,10 @@ private:
 
             // 硬否决：碰撞
             if (min_clearance < DWA_EMERGENCY_DIST) {
+                if (debug) {
+                    fprintf(stderr, "  [DWA] step %d: VETO collision min_clearance=%.3f < %.3f\n",
+                            k, min_clearance, DWA_EMERGENCY_DIST);
+                }
                 return -std::numeric_limits<double>::max();
             }
         }
@@ -148,6 +166,10 @@ private:
 
         // 硬否决：目标太远
         if (pred_target_dist > DWA_MAX_TARGET_RANGE) {
+            if (debug) {
+                fprintf(stderr, "  [DWA] VETO pred_target_dist=%.3f > %.3f\n",
+                        pred_target_dist, DWA_MAX_TARGET_RANGE);
+            }
             return -std::numeric_limits<double>::max();
         }
 
@@ -173,10 +195,40 @@ private:
         double dist_error = std::abs(pred_target_dist - FOLLOW_DIST);
         double target_dist_score = std::max(0.0, 1.0 - dist_error / FOLLOW_DIST);
 
-        return DWA_WEIGHT_HEADING   * heading_score +
-               DWA_WEIGHT_CLEARANCE * (0.7 * clearance_score + 0.3 * density_score) +
-               DWA_WEIGHT_VELOCITY  * velocity_score +
-               DWA_WEIGHT_TARGET_DIST * target_dist_score;
+        double total = DWA_WEIGHT_HEADING   * heading_score +
+                       DWA_WEIGHT_CLEARANCE * (0.7 * clearance_score + 0.3 * density_score) +
+                       DWA_WEIGHT_VELOCITY  * velocity_score +
+                       DWA_WEIGHT_TARGET_DIST * target_dist_score;
+
+        if (debug) {
+            double w_heading   = DWA_WEIGHT_HEADING * heading_score;
+            double w_clearance = DWA_WEIGHT_CLEARANCE * 0.7 * clearance_score;
+            double w_density   = DWA_WEIGHT_CLEARANCE * 0.3 * density_score;
+            double w_velocity  = DWA_WEIGHT_VELOCITY * velocity_score;
+            double w_target    = DWA_WEIGHT_TARGET_DIST * target_dist_score;
+
+            fprintf(stderr, "\n========== DWA Stuck Debug ==========\n");
+            fprintf(stderr, "Target: dist=%.3fm angle=%.1f° | Obstacles: %zu\n",
+                    target_dist, target_angle * 180.0 / M_PI, obstacles.size());
+            fprintf(stderr, "Sample: vx=%.3f vy=%.3f wz=%.3f\n", vx, vy, wz);
+            fprintf(stderr, "Trajectory: min_clearance=%.3fm density_penalty=%.3f pred_target_dist=%.3fm\n",
+                    min_clearance, density_penalty, pred_target_dist);
+            fprintf(stderr, "--- Score breakdown (raw -> weighted) ---\n");
+            fprintf(stderr, "heading:      %6.3f -> %6.3f  (w=%.2f)\n",
+                    heading_score, w_heading, DWA_WEIGHT_HEADING);
+            fprintf(stderr, "clearance:    %6.3f -> %6.3f  (w=%.2f*0.7)  min_clr=%.3f\n",
+                    clearance_score, w_clearance, DWA_WEIGHT_CLEARANCE, min_clearance);
+            fprintf(stderr, "density:      %6.3f -> %6.3f  (w=%.2f*0.3)  penalty=%.3f\n",
+                    density_score, w_density, DWA_WEIGHT_CLEARANCE, density_penalty);
+            fprintf(stderr, "velocity:     %6.3f -> %6.3f  (w=%.2f)  vel_proj=%.3f dist_factor=%.3f\n",
+                    velocity_score, w_velocity, DWA_WEIGHT_VELOCITY, vel_proj, dist_factor);
+            fprintf(stderr, "target_dist:  %6.3f -> %6.3f  (w=%.2f)  dist_error=%.3f\n",
+                    target_dist_score, w_target, DWA_WEIGHT_TARGET_DIST, dist_error);
+            fprintf(stderr, "TOTAL SCORE: %.4f\n", total);
+            fprintf(stderr, "======================================\n\n");
+        }
+
+        return total;
     }
 };
 

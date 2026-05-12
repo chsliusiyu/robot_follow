@@ -21,11 +21,11 @@ constexpr double LINEAR_Y_SCALE_FACTOR = 1.0; // 左右运动速度比例系数
 constexpr double RECTANGLE_WIDTH = 0.35;      // 矩形宽度 (米)
 
 // 目标遮罩 — UWB目标周围的LiDAR点视为被跟随者，不作为障碍物
-constexpr double TARGET_MASK_RADIUS = 0.25;    // 目标周围排除半径 (米)
+constexpr double TARGET_MASK_RADIUS = 0.3;     // 目标周围排除半径 (米)
 
 // UWB 信号丢失搜索
-constexpr double UWB_STALE_S = 0.4;              // UWB 数据陈旧，停止等待 (秒)
-constexpr double UWB_TIMEOUT_S = 0.8;           // UWB 超时进入搜索 (秒)
+constexpr double UWB_STALE_S = 0.3;              // UWB 数据陈旧，停止等待 (秒)
+constexpr double UWB_TIMEOUT_S = 0.5;           // UWB 超时进入搜索 (秒)
 constexpr double UWB_SEARCH_WZ = 0.5;           // 搜索旋转速度 (rad/s)
 
 // 速度限制
