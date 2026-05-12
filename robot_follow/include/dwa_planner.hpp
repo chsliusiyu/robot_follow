@@ -87,16 +87,12 @@ public:
                                             target_x, target_y, num_steps);
             double right_score = scoreSample(0.05, -0.15, 0.0, obstacles,
                                              target_x, target_y, num_steps);
-            double back_score = scoreSample(-0.15, 0.0, 0.0, obstacles,
-                                            target_x, target_y, num_steps);
 
             bool left_ok  = (left_score > -1e100);
             bool right_ok = (right_score > -1e100);
-            bool back_ok  = (back_score > -1e100);
-            fprintf(stderr, "[DWA] Recovery: left=%s right=%s back=%s best=%s\n",
+            fprintf(stderr, "[DWA] Recovery: left=%s right=%s best=%s\n",
                     left_ok  ? fmtScore(left_score).c_str()  : "VETOED",
                     right_ok ? fmtScore(right_score).c_str() : "VETOED",
-                    back_ok  ? fmtScore(back_score).c_str()  : "VETOED",
                     all_vetoed ? "VETOED" : fmtScore(best.score).c_str());
 
             if (left_ok && left_score > best.score) {
@@ -107,13 +103,8 @@ public:
                 best = {0.05, -0.15, 0.0, right_score};
                 fprintf(stderr, "[DWA] -> Selected RIGHT lateral recovery (vy=-0.15)\n");
             }
-            if (back_ok && back_score > best.score) {
-                best = {-0.15, 0.0, 0.0, back_score};
-                fprintf(stderr, "[DWA] -> Selected BACKWARD recovery (vx=-0.15)\n");
-            }
             if ((!left_ok || left_score <= best.score) &&
-                (!right_ok || right_score <= best.score) &&
-                (!back_ok || back_score <= best.score)) {
+                (!right_ok || right_score <= best.score)) {
                 fprintf(stderr, "[DWA] -> Recovery FAILED, staying at zero\n");
             }
 
