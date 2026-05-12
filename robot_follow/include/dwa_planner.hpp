@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <limits>
 #include <cstdio>
+#include <string>
 
 class DWAPlanner {
 public:
@@ -71,27 +72,44 @@ public:
 
         // 卡死恢复：最优轨迹被否决时，尝试横向移动找空隙
         if (best.vx < 0.05 && best.vy < 0.05 && std::abs(best.wz) < 0.05) {
-            // 打印最优轨迹的评分分解，帮助诊断卡死原因
-            fprintf(stderr, "\n[DWA] STUCK detected — best sample near zero, printing score breakdown:\n");
-            scoreSample(best.vx, best.vy, best.wz, obstacles,
-                       target_x, target_y, num_steps, true);
+            bool all_vetoed = (best.score < -1e100);
+
+            if (all_vetoed) {
+                fprintf(stderr, "\n[DWA] ALL SAMPLES VETOED — all %d trajectories blocked by EMERGENCY_DIST=%.2fm\n",
+                        DWA_VX_SAMPLES * DWA_VY_SAMPLES * DWA_WZ_SAMPLES, DWA_EMERGENCY_DIST);
+            } else {
+                fprintf(stderr, "\n[DWA] STUCK detected — best sample near zero, printing score breakdown:\n");
+                scoreSample(best.vx, best.vy, best.wz, obstacles,
+                           target_x, target_y, num_steps, true);
+            }
 
             double left_score = scoreSample(0.05,  0.15, 0.0, obstacles,
                                             target_x, target_y, num_steps);
             double right_score = scoreSample(0.05, -0.15, 0.0, obstacles,
                                              target_x, target_y, num_steps);
-            fprintf(stderr, "[DWA] Stuck recovery: left_score=%.4f right_score=%.4f best_score=%.4f\n",
-                    left_score, right_score, best.score);
-            if (left_score > best.score) {
+
+            bool left_ok  = (left_score > -1e100);
+            bool right_ok = (right_score > -1e100);
+            fprintf(stderr, "[DWA] Recovery: left=%s right=%s best=%s\n",
+                    left_ok  ? fmtScore(left_score).c_str()  : "VETOED",
+                    right_ok ? fmtScore(right_score).c_str() : "VETOED",
+                    all_vetoed ? "VETOED" : fmtScore(best.score).c_str());
+
+            if (left_ok && left_score > best.score) {
                 best = {0.05, 0.15, 0.0, left_score};
                 fprintf(stderr, "[DWA] -> Selected LEFT lateral recovery (vy=+0.15)\n");
             }
-            if (right_score > best.score) {
+            if (right_ok && right_score > best.score) {
                 best = {0.05, -0.15, 0.0, right_score};
                 fprintf(stderr, "[DWA] -> Selected RIGHT lateral recovery (vy=-0.15)\n");
             }
-            if (left_score <= best.score && right_score <= best.score) {
-                fprintf(stderr, "[DWA] -> Lateral recovery FAILED, staying at zero\n");
+            if ((!left_ok || left_score <= best.score) && (!right_ok || right_score <= best.score)) {
+                fprintf(stderr, "[DWA] -> Recovery FAILED, staying at zero\n");
+            }
+
+            // 全部否决时确保返回零速
+            if (all_vetoed) {
+                best = {0.0, 0.0, 0.0, 0.0};
             }
         }
 
@@ -99,6 +117,13 @@ public:
     }
 
 private:
+    static std::string fmtScore(double s) {
+        if (s < -1e100) return "VETOED";
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%.4f", s);
+        return std::string(buf);
+    }
+
     struct VelocityWindow {
         double min_vx, max_vx;
         double min_vy, max_vy;
@@ -148,8 +173,9 @@ private:
             }
             if (step_min_dist < min_clearance) min_clearance = step_min_dist;
 
-            // 硬否决：碰撞
-            if (min_clearance < DWA_EMERGENCY_DIST) {
+            // 硬否决：碰撞（零速不否决，不动不会撞）
+            bool zero_vel = (std::abs(vx) < 1e-6 && std::abs(vy) < 1e-6 && std::abs(wz) < 1e-6);
+            if (!zero_vel && min_clearance < DWA_EMERGENCY_DIST) {
                 if (debug) {
                     fprintf(stderr, "  [DWA] step %d: VETO collision min_clearance=%.3f < %.3f\n",
                             k, min_clearance, DWA_EMERGENCY_DIST);
