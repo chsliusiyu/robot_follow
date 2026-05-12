@@ -208,7 +208,7 @@ public:
             cmd_vel_msg.angular.z = wz;
         }
         else if (mode == MODE_FOLLOW) {
-            // UWB 信号丢失检测
+            // UWB 信号丢失检测（三态）
             auto now = std::chrono::steady_clock::now();
             double uwb_elapsed = std::chrono::duration<double>(now - last_uwb_time_).count();
             if (uwb_elapsed > UWB_TIMEOUT_S) {
@@ -216,6 +216,11 @@ public:
                 cmd_vel_msg.linear.x = 0.0;
                 cmd_vel_msg.linear.y = 0.0;
                 cmd_vel_msg.angular.z = UWB_SEARCH_WZ;
+            } else if (uwb_elapsed > UWB_STALE_S) {
+                // 数据陈旧：停止等待，不追冻结目标
+                cmd_vel_msg.linear.x = 0.0;
+                cmd_vel_msg.linear.y = 0.0;
+                cmd_vel_msg.angular.z = 0.0;
             } else {
                 DWAPlanner::Sample best = dwa_planner_.plan(
                     obstacles, target_x, target_y, cur_vx, cur_vy, cur_wz);
