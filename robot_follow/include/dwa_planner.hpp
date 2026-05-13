@@ -95,21 +95,24 @@ public:
                     right_ok ? fmtScore(right_score).c_str() : "VETOED",
                     all_vetoed ? "VETOED" : fmtScore(best.score).c_str());
 
+            bool recovery_selected = false;
+
             if (left_ok && left_score > best.score) {
                 best = {0.05, 0.15, 0.0, left_score};
+                recovery_selected = true;
                 fprintf(stderr, "[DWA] -> Selected LEFT lateral recovery (vy=+0.15)\n");
             }
             if (right_ok && right_score > best.score) {
                 best = {0.05, -0.15, 0.0, right_score};
+                recovery_selected = true;
                 fprintf(stderr, "[DWA] -> Selected RIGHT lateral recovery (vy=-0.15)\n");
             }
-            if ((!left_ok || left_score <= best.score) &&
-                (!right_ok || right_score <= best.score)) {
+            if (!recovery_selected) {
                 fprintf(stderr, "[DWA] -> Recovery FAILED, staying at zero\n");
             }
 
-            // 全部否决时确保返回零速
-            if (all_vetoed) {
+            // 全部否决且恢复也失败时才归零
+            if (all_vetoed && !recovery_selected) {
                 best = {0.0, 0.0, 0.0, 0.0};
             }
         }
