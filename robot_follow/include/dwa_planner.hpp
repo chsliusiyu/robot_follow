@@ -219,9 +219,9 @@ private:
             return -std::numeric_limits<double>::max();
         }
 
-        // 评分 1: 朝向 —— 终点处目标偏角越小越好
+        // 评分 1: 朝向 —— 终点处目标偏角越小越好（cos 非线性，大步长惩罚）
         double angle_error = std::abs(std::atan2(pred_target_y, pred_target_x));
-        double heading_score = 1.0 - angle_error / M_PI;
+        double heading_score = std::cos(angle_error);
 
         // 评分 2: 安全距离 —— 轨迹上最近障碍距离（非线性指数衰减，近距离惩罚剧烈）
         double clearance_score = 1.0 - std::exp(-3.0 * min_clearance / DWA_SAFE_DIST);
@@ -235,7 +235,8 @@ private:
             (target_dist - FOLLOW_DIST) / (DWA_MAX_TARGET_RANGE - FOLLOW_DIST) * 0.5 + 0.15,
             0.15, 1.0);
         double vel_proj = vx * std::cos(target_angle) + vy * std::sin(target_angle);
-        double velocity_score = vel_proj / DWA_MAX_VX * dist_factor;
+        double heading_alignment = std::abs(std::cos(target_angle));
+        double velocity_score = vel_proj / DWA_MAX_VX * dist_factor * heading_alignment;
 
         // 评分 4: 目标距离 —— 终点与理想跟随距离的偏差
         double dist_error = std::abs(pred_target_dist - FOLLOW_DIST);
