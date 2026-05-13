@@ -230,15 +230,15 @@ public:
             }
         }
         
+        // 缓存原始 DWA 速度，供下一帧动态窗口计算（不受死区过滤影响）
+        state_.setVelocity(cmd_vel_msg.linear.x, cmd_vel_msg.linear.y, cmd_vel_msg.angular.z);
+
         // agibot 死区过滤：小指令会被拒，直接置零避免执行打折扣
         if (std::abs(cmd_vel_msg.linear.x) < 0.05)  cmd_vel_msg.linear.x = 0.0;
         if (std::abs(cmd_vel_msg.linear.y) < 0.10)  cmd_vel_msg.linear.y = 0.0;
         if (std::abs(cmd_vel_msg.angular.z) < 0.05) cmd_vel_msg.angular.z = 0.0;
 
-        // 缓存速度
-        state_.setVelocity(cmd_vel_msg.linear.x, cmd_vel_msg.linear.y, cmd_vel_msg.angular.z);
-        
-        // 发布速度
+        // 发布速度（死区过滤后的值）
         publishVelocity(cmd_vel_msg, mode);
         
         // OpenCV可视化

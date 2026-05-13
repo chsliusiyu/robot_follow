@@ -224,7 +224,7 @@ private:
     
     RCLCPP_INFO(this->get_logger(), "distance: %.2f   loc_az_aoa : %.2f   RSSI : %.2f", distance , loc_az_aoa ,RSSI);
     
-    if(RSSI < -77)
+    if(RSSI < -79)
     {
       RSSI_enum++;
       if(RSSI_enum > 3)

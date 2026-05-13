@@ -71,7 +71,7 @@ public:
         }
 
         // 卡死恢复：最优轨迹被否决时，尝试横向移动找空隙
-        if (best.vx < 0.05 && best.vy < 0.05 && std::abs(best.wz) < 0.05) {
+        if (std::abs(best.vx) < 0.05 && std::abs(best.vy) < 0.05 && std::abs(best.wz) < 0.05) {
             bool all_vetoed = (best.score < -1e100);
 
             if (all_vetoed) {
@@ -216,7 +216,7 @@ private:
             (target_dist - FOLLOW_DIST) / (DWA_MAX_TARGET_RANGE - FOLLOW_DIST) * 0.5 + 0.15,
             0.15, 1.0);
         double vel_proj = vx * std::cos(target_angle) + vy * std::sin(target_angle);
-        double velocity_score = std::max(0.0, vel_proj) / DWA_MAX_VX * dist_factor;
+        double velocity_score = vel_proj / DWA_MAX_VX * dist_factor;
 
         // 评分 4: 目标距离 —— 终点与理想跟随距离的偏差
         double dist_error = std::abs(pred_target_dist - FOLLOW_DIST);
