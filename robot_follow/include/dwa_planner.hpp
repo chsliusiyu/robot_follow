@@ -83,10 +83,12 @@ public:
                            target_x, target_y, num_steps, true);
             }
 
-            double left_score = scoreSample(0.05,  0.15, 0.0, obstacles,
-                                            target_x, target_y, num_steps);
-            double right_score = scoreSample(0.05, -0.15, 0.0, obstacles,
-                                             target_x, target_y, num_steps);
+            double left_score = scoreSample(0.05,  0.25, 0.0, obstacles,
+                                            target_x, target_y, num_steps,
+                                            false, true);
+            double right_score = scoreSample(0.05, -0.25, 0.0, obstacles,
+                                             target_x, target_y, num_steps,
+                                             false, true);
 
             bool left_ok  = (left_score > -1e100);
             bool right_ok = (right_score > -1e100);
@@ -98,14 +100,14 @@ public:
             bool recovery_selected = false;
 
             if (left_ok && left_score > best.score) {
-                best = {0.05, 0.15, 0.0, left_score};
+                best = {0.05, 0.25, 0.0, left_score};
                 recovery_selected = true;
-                fprintf(stderr, "[DWA] -> Selected LEFT lateral recovery (vy=+0.15)\n");
+                fprintf(stderr, "[DWA] -> Selected LEFT lateral recovery (vy=+0.25)\n");
             }
             if (right_ok && right_score > best.score) {
-                best = {0.05, -0.15, 0.0, right_score};
+                best = {0.05, -0.25, 0.0, right_score};
                 recovery_selected = true;
-                fprintf(stderr, "[DWA] -> Selected RIGHT lateral recovery (vy=-0.15)\n");
+                fprintf(stderr, "[DWA] -> Selected RIGHT lateral recovery (vy=-0.25)\n");
             }
             if (!recovery_selected) {
                 fprintf(stderr, "[DWA] -> Recovery FAILED, staying at zero\n");
@@ -149,9 +151,19 @@ private:
     double scoreSample(double vx, double vy, double wz,
                        const std::vector<std::pair<double, double>>& obstacles,
                        double target_x, double target_y, int num_steps,
-                       bool debug = false)
+                       bool debug = false, bool recovery = false)
     {
         double target_angle = std::atan2(target_y, target_x);
+
+        // 恢复轨迹需要趋势判断：记录起点 clearance，只否决持续恶化的轨迹
+        double start_clearance = std::numeric_limits<double>::max();
+        if (recovery) {
+            for (const auto& obs : obstacles) {
+                double d2 = obs.first * obs.first + obs.second * obs.second;
+                double dist = std::sqrt(d2);
+                if (dist < start_clearance) start_clearance = dist;
+            }
+        }
 
         // 前向仿真轨迹，同时计算 clearance 和障碍密度
         double x = 0.0, y = 0.0, theta = 0.0;
@@ -180,6 +192,10 @@ private:
             // 硬否决：碰撞（零速不否决，不动不会撞）
             bool zero_vel = (std::abs(vx) < 1e-6 && std::abs(vy) < 1e-6 && std::abs(wz) < 1e-6);
             if (!zero_vel && min_clearance < DWA_EMERGENCY_DIST) {
+                // 恢复轨迹使用趋势否决：clearance 比起点恶化超过 3cm 才否决
+                if (recovery && min_clearance >= start_clearance - 0.03) {
+                    continue; // 保持距离或远离中，不否决
+                }
                 if (debug) {
                     fprintf(stderr, "  [DWA] step %d: VETO collision min_clearance=%.3f < %.3f\n",
                             k, min_clearance, DWA_EMERGENCY_DIST);
