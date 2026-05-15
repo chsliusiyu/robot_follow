@@ -2,17 +2,20 @@
 
 ## 1. 版本对比概览
 
-| 维度 | V1.0 (6166d8e) | V1.1 (7aeb4a7) | V1.2 (当前) |
-|------|----------------|----------------|-------------|
-| 日期 | 2026-05-07 | 2026-05-08 | 2026-05-09 |
-| 最高速度 | 1.0 m/s | 0.45 m/s | 0.45 m/s |
-| 否决距离 | 0.15 m | 0.50 m (含半径) | 0.35 m (点模型) |
-| 安全距离 | 0.4 m | 0.5 m | 0.5 m |
-| 目标遮罩 | 无 | 0.45m | 0.25m |
-| 安全评分 | 线性 | 非线性指数 + 障碍密度 | 非线性指数 + 障碍密度 |
-| 卡死恢复 | 无 | 原地旋转 | 横向平移 vy=±0.15 |
-| UWB 丢失 | 追假位置 | 追假位置 | 停止等待→0.2s 超时旋转搜索 |
-| 距离衰减 | 0.8× + 0.2 | 0.25× + 0.15 | 0.5× + 0.15 |
+| 维度 | V1.0 (6166d8e) | V1.1 (7aeb4a7) | V1.2 (051f85d) | V1.3 (当前) |
+|------|----------------|----------------|----------------|-------------|
+| 日期 | 2026-05-07 | 2026-05-08 | 2026-05-09 | 2026-05-13 |
+| 最高速度 | 1.0 m/s | 0.45 m/s | 0.45 m/s | 0.45 m/s |
+| 否决距离 | 0.15 m | 0.50 m (含半径) | 0.35 m (点模型) | 0.35 m (点模型) |
+| 安全距离 | 0.4 m | 0.5 m | 0.5 m | 0.5 m |
+| 目标遮罩 | 无 | 0.45m | 0.25m | 0.30m |
+| 安全评分 | 线性 | 非线性指数 + 障碍密度 | 非线性指数 + 障碍密度 | 非线性指数 + 障碍密度 |
+| 卡死恢复 | 无 | 原地旋转 | 横向平移 vy=±0.15 | 横向平移 vy=±0.25 + 趋势否决 |
+| UWB 丢失 | 追假位置 | 追假位置 | 停止→超时旋转搜索 | 三态(正常/陈旧/超时) + RSSI=-79 |
+| 朝向评分 | 线性 1-angle/π | 线性 1-angle/π | 线性 1-angle/π | cos(angle) 非线性 |
+| 速度对齐 | 无 | 无 | 无 | |cos(target_angle)| 惩罚斜行 |
+| wz 加速度 | 2.0 | 2.0 | 2.0 | 4.0 rad/s² |
+| 距离衰减 | 0.8× + 0.2 | 0.25× + 0.15 | 0.5× + 0.15 | 0.5× + 0.15 |
 
 ---
 
@@ -420,41 +423,276 @@ UWB 更新 → DWA 跟随 → 0.4s 无数据 → 停止等待 → 0.8s 超时 �
 
 ---
 
-## 4. 已知问题与后续改进方向
+---
 
-| 问题 | 现状 | 改进方向 |
-|------|------|---------|
-| 太近时不会后退 | velocity_score 只奖励正向速度 | 双向速度评分（后退也奖励） |
-| 否决后只有横向恢复 | 固定 vy=±0.15 | 自适应方向选择 |
-| 点模型碰撞检测 | 从中心算距离，忽略机器人宽度 | 考虑加回机器人半径（需精细调参） |
+## 4. V1.3 变更清单（2026-05-13）
+
+### 变更 17：零速豁免碰撞否决 + VETOED 格式化（435a692）
+
+**文件**: `dwa_planner.hpp`
+
+**改动 17a — 零速豁免**:
+```diff
++ // 硬否决：碰撞（零速不否决，不动不会撞）
++ bool zero_vel = (std::abs(vx) < 1e-6 && std::abs(vy) < 1e-6 && std::abs(wz) < 1e-6);
++ if (!zero_vel && min_clearance < DWA_EMERGENCY_DIST) {
+```
+
+**改动 17b — 全否决检测**:
+```diff
++ bool all_vetoed = (best.score < -1e100);
++ if (all_vetoed) {
++     fprintf(stderr, "\n[DWA] ALL SAMPLES VETOED — all %d trajectories blocked\n", ...);
++ }
+```
+
+**改动 17c — fmtScore() 辅助函数**:
+```diff
++ static std::string fmtScore(double s) {
++     if (s < -1e100) return "VETOED";
++     char buf[32];
++     snprintf(buf, sizeof(buf), "%.4f", s);
++     return std::string(buf);
++ }
+```
+
+**原因**: 速度为 0 的轨迹不会产生碰撞，之前的代码把"不动"也否决了，导致 all_vetoed 时连零速都不可选。同时用 `fmtScore()` 统一输出格式，避免 `-DBL_MAX` 显示为巨大数字。
 
 ---
 
-## 4. DWA 使用说明
+### 变更 18：DWA 卡死调试日志（91535cd）
 
-### 4.1 参数调优
+**文件**: `dwa_planner.hpp` + `common_types.hpp`
+
+**改动 18a — scoreSample 增加 debug 模式**:
+```diff
++ double scoreSample(double vx, double vy, double wz, ...,
++                    bool debug = false)
+```
+debug=true 时打印完整评分分解（heading/clearance/density/velocity/target_dist）及否决原因。
+
+**改动 18b — 恢复结果日志**: 左右横向恢复的结果和选中方向打印到 stderr。
+
+**改动 18c — 参数微调**:
+- `UWB_STALE_S`: 0.4 → 0.3s
+- `UWB_TIMEOUT_S`: 0.8 → 0.5s
+- `TARGET_MASK_RADIUS`: 0.25 → 0.3m
+
+**原因**: 卡死时缺乏诊断信息，不知道是哪个评分项导致最优轨迹接近零速。参数微调：UWB 阈值缩短加快丢失响应；目标遮罩扩大减少被跟随者被误判为障碍。
+
+---
+
+### 变更 19：死区过滤 + 后退恢复（03f6311）
+
+**文件**: `dwa_planner.hpp` + `lidar_tracker.hpp`
+
+**改动 19a — agibot 死区过滤**（`lidar_tracker.hpp`）:
+```diff
++ // agibot 死区过滤：小指令会被拒，直接置零避免执行打折扣
++ if (std::abs(cmd_vel_msg.linear.x) < 0.05)  cmd_vel_msg.linear.x = 0.0;
++ if (std::abs(cmd_vel_msg.linear.y) < 0.10)  cmd_vel_msg.linear.y = 0.0;
++ if (std::abs(cmd_vel_msg.angular.z) < 0.05) cmd_vel_msg.angular.z = 0.0;
+```
+
+**改动 19b — 后退恢复**:
+```diff
++ double back_score = scoreSample(-0.15, 0.0, 0.0, obstacles, ...);
++ if (back_ok && back_score > best.score) {
++     best = {-0.15, 0.0, 0.0, back_score};
++ }
+```
+
+**原因**: agibot 底盘对小速度指令响应不佳，部分执行导致轨迹变形。死区过滤将低于阈值的指令直接置零。后退恢复在左右都堵死时提供撤退选项。
+
+---
+
+### 变更 20：回退后退恢复（f4b1ee9）
+
+**文件**: `dwa_planner.hpp`
+
+移除变更 19b 的后退恢复，仅保留左右横向恢复。
+
+**原因**: 后退恢复在测试中效果不佳——后退时看不到障碍物更容易撞，且目标在正前方时后退会拉大距离。
+
+---
+
+### 变更 21：多项修复（b02decc）
+
+**文件**: `dwa_planner.hpp` + `lidar_tracker.hpp` + `uwb_serial_pub.cpp`
+
+**改动 21a — 卡死检测修复**:
+```diff
+- if (best.vx < 0.05 && best.vy < 0.05 && std::abs(best.wz) < 0.05) {
++ if (std::abs(best.vx) < 0.05 && std::abs(best.vy) < 0.05 && std::abs(best.wz) < 0.05) {
+```
+负向速度（如 DWA 选出 vx=-0.08 后退）之前不被识别为"接近零速"，漏掉卡死检测。
+
+**改动 21b — velocity_score 允许负值**:
+```diff
+- double velocity_score = std::max(0.0, vel_proj) / DWA_MAX_VX * dist_factor;
++ double velocity_score = vel_proj / DWA_MAX_VX * dist_factor;
+```
+原先 `max(0.0, vel_proj)` 把后退速度投影评为 0（和静止同分），DWA 无法区分"后退"和"不动"。
+
+**改动 21c — 死区缓存顺序修复**（`lidar_tracker.hpp`）:
+```diff
++ // 缓存原始 DWA 速度，供下一帧动态窗口计算（不受死区过滤影响）
++ state_.setVelocity(cmd_vel_msg.linear.x, cmd_vel_msg.linear.y, cmd_vel_msg.angular.z);
++
+  // agibot 死区过滤
+  if (std::abs(cmd_vel_msg.linear.x) < 0.05)  cmd_vel_msg.linear.x = 0.0;
+  ...
+- // 缓存速度
+- state_.setVelocity(cmd_vel_msg.linear.x, cmd_vel_msg.linear.y, cmd_vel_msg.angular.z);
+```
+原先先过滤再缓存，DWA 内部永远收不到小幅加速度，导致速度窗口无法突破死区。改为先缓存再过滤，DWA 内部可以累积速度。
+
+**改动 21d — RSSI 阈值下调**（`uwb_serial_pub.cpp`）:
+```diff
+- if(RSSI < -77)
++ if(RSSI < -79)
+```
+信号较弱时仍保留 UWB 数据，减少不必要的丢失。
+
+---
+
+### 变更 22：all_vetoed 覆盖修复（429a4e6）
+
+**文件**: `dwa_planner.hpp`
+
+**改动**:
+```diff
++ bool recovery_selected = false;
++
+  if (left_ok && left_score > best.score) {
+      best = {0.05, 0.15, 0.0, left_score};
++     recovery_selected = true;
+  }
+  if (right_ok && right_score > best.score) {
+      best = {0.05, -0.15, 0.0, right_score};
++     recovery_selected = true;
+  }
+
+- // 全部否决时确保返回零速
+- if (all_vetoed) {
++ // 全部否决且恢复也失败时才归零
++ if (all_vetoed && !recovery_selected) {
+      best = {0.0, 0.0, 0.0, 0.0};
+  }
+```
+
+**原因**: 所有 525 条轨迹被否决时，横向恢复可能找到有效方向（如右侧 score=0.5514）。但原代码的 `if (all_vetoed)` 无条件将 best 归零，完全覆盖了恢复的选择。这是导致"明明有路但狗不动"的直接 bug。
+
+---
+
+### 变更 23：横向恢复加速 + 趋势否决（7587b71）
+
+**文件**: `dwa_planner.hpp`
+
+**改动 23a — 恢复速度提升**:
+```diff
+- double left_score  = scoreSample(0.05,  0.15, 0.0, obstacles, ...);
+- double right_score = scoreSample(0.05, -0.15, 0.0, obstacles, ...);
++ double left_score  = scoreSample(0.05,  0.25, 0.0, obstacles, ..., false, true);
++ double right_score = scoreSample(0.05, -0.25, 0.0, obstacles, ..., false, true);
+```
+横向速度从 ±0.15 提升到 ±0.25 m/s，每步位移 0.025m → 0.0375m，1.5s 总横移 0.225m → 0.375m。
+
+**改动 23b — 趋势否决**:
+```diff
++ // 恢复轨迹需要趋势判断：记录起点 clearance，只否决持续恶化的轨迹
++ double start_clearance = std::numeric_limits<double>::max();
++ if (recovery) {
++     for (const auto& obs : obstacles) {
++         double d2 = obs.first * obs.first + obs.second * obs.second;
++         double dist = std::sqrt(d2);
++         if (dist < start_clearance) start_clearance = dist;
++     }
++ }
+```
+```diff
+  if (!zero_vel && min_clearance < DWA_EMERGENCY_DIST) {
++     // 恢复轨迹使用趋势否决：clearance 比起点恶化超过 3cm 才否决
++     if (recovery && min_clearance >= start_clearance - 0.03) {
++         continue; // 保持距离或远离中，不否决
++     }
+      return -std::numeric_limits<double>::max();
+  }
+```
+
+**原因**: 机器人本身就在 EMERGENCY_DIST 内（如紧贴墙壁 0.33m < 0.35m）时，任何非零速度的横移轨迹第一步就可能触发否决。趋势否决只否决"离障碍越来越近"的轨迹，允许"保持距离或远离"的侧移。这是解决 BUG 2（被困在 EMERGENCY_DIST 内无法动弹）的关键。
+
+---
+
+### 变更 24：非线性朝向 + 速度对齐 + wz 加速（0cb52de）
+
+**文件**: `dwa_planner.hpp` + `common_types.hpp`
+
+**改动 24a — 朝向评分 cos 非线性化**:
+```diff
+- double heading_score = 1.0 - angle_error / M_PI;
++ double heading_score = std::cos(angle_error);
+```
+线性评分对小偏差和大偏差区分度不够。cos 函数在 0° 附近平坦（小偏差无伤大雅），大偏差时陡峭（严重惩罚）。
+
+对比效果：30° → cos=0.866 vs 旧版 0.833（接近）；60° → cos=0.500 vs 旧版 0.667（显著惩罚）；90° → cos=0.0 vs 旧版 0.5（完全否决）。
+
+**改动 24b — 速度对齐因子**:
+```diff
++ double heading_alignment = std::abs(std::cos(target_angle));
+- double velocity_score = vel_proj / DWA_MAX_VX * dist_factor;
++ double velocity_score = vel_proj / DWA_MAX_VX * dist_factor * heading_alignment;
+```
+旧版 velocity_score 只考察 vx/vy 在目标方向上的投影，不管机器人面朝哪里。即使机器人侧身对目标（target_angle=90°），vx 照样得满分。乘上 `|cos(target_angle)|` 后，侧身时速度奖励打折，DWA 会优先转身再前进。
+
+**改动 24c — wz 加速度翻倍**:
+```diff
+- constexpr double DWA_ACC_WZ = 2.0;
++ constexpr double DWA_ACC_WZ = 4.0;             // wz 角加速度 (rad/s²)
+```
+旧版每帧最多旋转 0.2 rad/s（约 11°/帧），1.5s 后最多转 17°。翻倍后每帧最多 0.4 rad/s，1.5s 最多转 34°，轨迹终点朝向大幅改善。
+
+三项改动协同效果：机器人不再斜着走，而是先转身面朝目标再前进。
+
+---
+
+## 5. 已知问题与后续改进方向
+
+| 问题 | 现状 | 改进方向 |
+|------|------|---------|
+| 太近时不会后退 | velocity_score 允许负值但不激励后退 | 目标过近时增加后退奖励 |
+| 目标遮罩盲区 | TARGET_MASK_RADIUS=0.3m 可能漏掉障碍 | 自适应遮罩（根据障碍密度调整） |
+| 点模型碰撞检测 | 从中心算距离，忽略机器人宽度 | 考虑椭圆模型（机身 0.7m×0.35m） |
+| 动态窗口受加速度限制 | 恢复轨迹 vy 受限于 DWA_MAX_VY=0.3 | 恢复时可放宽速度限制 |
+| 无 AOA 角度区分 | UWB 只给距离，不知道人在左/右 | 利用 AOA 提前调整朝向 |
+
+---
+
+## 6. DWA 使用说明
+
+### 6.1 参数调优
 
 所有可调参数在 `common_types.hpp` 中，重新编译生效：
 
 | 参数 | 默认值 | 调大/调小的效果 |
 |------|--------|----------------|
 | `DWA_MAX_VX` | 0.45 | ↑ 更快速 / ↓ 更平稳 |
-| `DWA_EMERGENCY_DIST` | 0.25 | ↑ 更保守(保持距离) / ↓ 更激进 |
+| `DWA_EMERGENCY_DIST` | 0.35 | ↑ 更保守(保持距离) / ↓ 更激进 |
 | `DWA_SAFE_DIST` | 0.5 | ↑ 更早触发绕行 / ↓ 更晚绕行 |
-| `DWA_ROBOT_RADIUS` | 0.25 | ↑ 碰撞检测更保守 / ↓ 更宽松 |
 | `DWA_WEIGHT_HEADING` | 0.35 | ↑ 更积极面朝目标 / ↓ 更注重侧面移动 |
 | `DWA_WEIGHT_CLEARANCE` | 0.40 | ↑ 更保守避障 / ↓ 更激进贴近障碍 |
 | `DWA_WEIGHT_VELOCITY` | 0.10 | ↑ 更快速 / ↓ 更慢 |
 | `DWA_WEIGHT_TARGET_DIST` | 0.15 | ↑ 更精确保持跟随距离 / ↓ 距离容忍更大 |
-| `TARGET_MASK_RADIUS` | 0.45 | ↑ 排除更大范围 / ↓ 保留更多障碍点 |
+| `TARGET_MASK_RADIUS` | 0.30 | ↑ 排除更大范围 / ↓ 保留更多障碍点 |
 | `FOLLOW_DIST` | 0.6 | ↑ 跟得更远 / ↓ 跟得更近 |
+| `DWA_ACC_WZ` | 4.0 | ↑ 转弯更快 / ↓ 转弯更平缓 |
 
-### 4.2 常见场景调优
+### 6.2 常见场景调优
 
 **场景 1: 狭窄走廊，机器狗贴墙走**
 ```
 调大 DWA_WEIGHT_CLEARANCE (0.40 → 0.50)
-调大 DWA_ROBOT_RADIUS (0.25 → 0.30)
+调大 DWA_EMERGENCY_DIST (0.35 → 0.45)
 ```
 
 **场景 2: 开阔空间，希望跟得更快更紧**
@@ -472,10 +710,10 @@ UWB 更新 → DWA 跟随 → 0.4s 无数据 → 停止等待 → 0.8s 超时 �
 
 **场景 4: 被跟随者紧贴障碍物（人靠着墙站）**
 ```
-调小 TARGET_MASK_RADIUS (0.45 → 0.25) — 避免把墙也排除
+调小 TARGET_MASK_RADIUS (0.30 → 0.20) — 避免把墙也排除
 ```
 
-### 4.3 调试技巧
+### 6.3 调试技巧
 
 1. **OpenCV 可视化**: launch 文件设 `enable_opencv: true`，窗口内：
    - 红色点 = 否决距离内的障碍
@@ -490,3 +728,5 @@ UWB 更新 → DWA 跟随 → 0.4s 无数据 → 停止等待 → 0.8s 超时 �
 3. **快速验证**: 可以先用 `ros2 topic pub /cmd_vel` 直接发速度指令验证 `agibot` 节点正常响应。
 
 4. **检查目标遮罩**: 如果机器狗还是绕着你转，可能是 `TARGET_MASK_RADIUS` 不够大，或者 UWB 位置偏差太大导致遮罩没遮对你的腿。
+
+5. **DWA 调试日志**: 卡死时会自动输出评分分解到 stderr，包含 heading/clearance/density/velocity/target_dist 各项得分和否决原因。出现异常时查看终端输出定位问题。
