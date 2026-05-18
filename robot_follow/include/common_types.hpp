@@ -50,13 +50,13 @@ constexpr double DWA_MAX_WZ = 1.0;             // wz 上限 (rad/s)
 // DWA 加速度约束
 constexpr double DWA_ACC_VX = 0.5;             // vx 加速度 (m/s²)
 constexpr double DWA_ACC_VY = 0.5;             // vy 加速度 (m/s²)
-constexpr double DWA_ACC_WZ = 4.0;             // wz 角加速度 (rad/s²)
+constexpr double DWA_ACC_WZ = 2.5;             // wz 角加速度 (rad/s²)
 
 // DWA 评分权重
-constexpr double DWA_WEIGHT_HEADING = 0.44;     // 朝向权重
+constexpr double DWA_WEIGHT_HEADING = 0.40;     // 朝向权重
 constexpr double DWA_WEIGHT_CLEARANCE = 0.40;   // 安全距离权重
 constexpr double DWA_WEIGHT_VELOCITY = 0.01;    // 速度权重
-constexpr double DWA_WEIGHT_TARGET_DIST = 0.15; // 目标距离权重
+constexpr double DWA_WEIGHT_TARGET_DIST = 0.19; // 目标距离权重
 
 // DWA 安全阈值
 constexpr double DWA_EMERGENCY_DIST = 0.35;     // 否决距离 (m)

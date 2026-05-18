@@ -46,6 +46,32 @@ public:
         }
 
         VelocityWindow window = computeWindow(cur_vx, cur_vy, cur_wz);
+
+        // 前方走廊无障碍 → PD控制器对准目标直走
+        if (isCorridorClear(obstacles, target_x, target_y, target_dist)) {
+            double heading_error = std::atan2(target_y, target_x);
+            // 角度差分归一化（防止±π跳变导致微分爆炸）
+            double diff = heading_error - prev_heading_error_;
+            if (diff > M_PI) diff -= 2.0 * M_PI;
+            else if (diff < -M_PI) diff += 2.0 * M_PI;
+            double heading_error_rate = diff / 0.1;
+            prev_heading_error_ = heading_error;
+
+            double cos_heading = std::cos(heading_error);
+            double vx = DWA_MAX_VX * cos_heading;
+            double dist_factor = std::clamp((target_dist - FOLLOW_DIST) / 0.5, 0.0, 1.0);
+            vx = std::clamp(vx * dist_factor, window.min_vx, window.max_vx);
+
+            // 死区：小角度不转，防止抖动
+            if (std::abs(heading_error) < HEADING_DEADBAND) {
+                return {vx, 0.0, 0.0, 1.0};
+            }
+
+            double wz = std::clamp(KP_HEADING * heading_error + KD_HEADING * heading_error_rate,
+                                   window.min_wz, window.max_wz);
+            return {vx, 0.0, wz, 1.0};
+        }
+
         int num_steps = static_cast<int>(DWA_SIM_TIME / DWA_DT);
 
         Sample best{0.0, 0.0, 0.0, -std::numeric_limits<double>::max()};
@@ -123,6 +149,28 @@ public:
     }
 
 private:
+    static constexpr double CORRIDOR_HALF_WIDTH = 0.25;  // 前方走廊半宽 (m)
+    static constexpr double CORRIDOR_MAX_LENGTH = 1.2;   // 前方走廊最大检查距离 (m)
+    static constexpr double KP_HEADING = 1.0;             // 朝向P增益
+    static constexpr double KD_HEADING = 0.3;             // 朝向D增益（阻尼振荡）
+    static constexpr double HEADING_DEADBAND = 0.05;      // 朝向死区 (rad, ~3°)
+
+    double prev_heading_error_ = 0.0;  // PD控制器状态
+
+    // 检查目标方向矩形走廊内是否有障碍物
+    bool isCorridorClear(const std::vector<std::pair<double, double>>& obstacles,
+                         double target_x, double target_y, double target_dist) {
+        for (const auto& obs : obstacles) {
+            double ox = obs.first, oy = obs.second;
+            double proj = (ox * target_x + oy * target_y) / target_dist;
+            double max_proj = std::min(target_dist, CORRIDOR_MAX_LENGTH);
+            if (proj < 0.0 || proj > max_proj) continue;
+            double perp = std::abs(ox * target_y - oy * target_x) / target_dist;
+            if (perp < CORRIDOR_HALF_WIDTH) return false;
+        }
+        return true;
+    }
+
     static std::string fmtScore(double s) {
         if (s < -1e100) return "VETOED";
         char buf[32];
