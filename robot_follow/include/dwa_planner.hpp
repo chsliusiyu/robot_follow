@@ -169,12 +169,20 @@ private:
         double x = 0.0, y = 0.0, theta = 0.0;
         double min_clearance = std::numeric_limits<double>::max();
         double density_penalty = 0.0;
+        double heading_sum = 0.0;
 
         for (int k = 0; k < num_steps; ++k) {
             // 欧拉积分
             x += (vx * std::cos(theta) - vy * std::sin(theta)) * DWA_DT;
             y += (vx * std::sin(theta) + vy * std::cos(theta)) * DWA_DT;
             theta += wz * DWA_DT;
+
+            // 每步朝向评分累积（避免"承诺15步后对齐但只走1步"作弊）
+            double step_tx = (target_x - x) * std::cos(theta) + (target_y - y) * std::sin(theta);
+            double step_ty = -(target_x - x) * std::sin(theta) + (target_y - y) * std::cos(theta);
+            double step_angle = std::abs(std::atan2(step_ty, step_tx));
+            double step_cos = std::cos(step_angle);
+            heading_sum += step_cos * step_cos;
 
             double step_min_dist = std::numeric_limits<double>::max();
             for (const auto& obs : obstacles) {
@@ -219,9 +227,8 @@ private:
             return -std::numeric_limits<double>::max();
         }
 
-        // 评分 1: 朝向 —— 终点处目标偏角越小越好（cos 非线性，大步长惩罚）
-        double angle_error = std::abs(std::atan2(pred_target_y, pred_target_x));
-        double heading_score = std::cos(angle_error);
+        // 评分 1: 朝向 —— 全程15步cos²平均，杜绝"承诺对齐"作弊
+        double heading_score = heading_sum / num_steps;
 
         // 评分 2: 安全距离 —— 轨迹上最近障碍距离（非线性指数衰减，近距离惩罚剧烈）
         double clearance_score = 1.0 - std::exp(-3.0 * min_clearance / DWA_SAFE_DIST);

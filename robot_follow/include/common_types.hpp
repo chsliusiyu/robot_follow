@@ -53,9 +53,9 @@ constexpr double DWA_ACC_VY = 0.5;             // vy 加速度 (m/s²)
 constexpr double DWA_ACC_WZ = 4.0;             // wz 角加速度 (rad/s²)
 
 // DWA 评分权重
-constexpr double DWA_WEIGHT_HEADING = 0.35;     // 朝向权重
+constexpr double DWA_WEIGHT_HEADING = 0.44;     // 朝向权重
 constexpr double DWA_WEIGHT_CLEARANCE = 0.40;   // 安全距离权重
-constexpr double DWA_WEIGHT_VELOCITY = 0.10;    // 速度权重
+constexpr double DWA_WEIGHT_VELOCITY = 0.01;    // 速度权重
 constexpr double DWA_WEIGHT_TARGET_DIST = 0.15; // 目标距离权重
 
 // DWA 安全阈值
