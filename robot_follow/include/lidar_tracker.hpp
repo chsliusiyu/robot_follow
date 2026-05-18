@@ -9,6 +9,7 @@
 #include "common_types.hpp"
 #include "kalman_filter.hpp"
 #include "dwa_planner.hpp"
+#include "local_occupancy_grid.hpp"
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <opencv2/opencv.hpp>
@@ -143,7 +144,31 @@ public:
         if (scan_msg->ranges.empty()) {
             return;
         }
-        
+
+        // 里程计积分 + 栅格更新
+        double cur_vx, cur_vy, cur_wz;
+        state_.getVelocity(cur_vx, cur_vy, cur_wz);
+        auto now = std::chrono::steady_clock::now();
+        double dt = 0.1;
+        if (last_scan_time_.time_since_epoch().count() > 0) {
+            dt = std::chrono::duration<double>(now - last_scan_time_).count();
+            if (dt > 0.5) dt = 0.1;  // 长时间间隔说明刚启动
+        }
+        last_scan_time_ = now;
+
+        // 世界坐标积分
+        robot_yaw_ += cur_wz * dt;
+        robot_x_ += (cur_vx * std::cos(robot_yaw_) - cur_vy * std::sin(robot_yaw_)) * dt;
+        robot_y_ += (cur_vx * std::sin(robot_yaw_) + cur_vy * std::cos(robot_yaw_)) * dt;
+
+        // 栅格衰减 + 移动原点跟随机器人
+        grid_.decay();
+        grid_.setOrigin(robot_x_, robot_y_);
+
+        // 目标世界坐标
+        double target_wx = robot_x_ + target_x * std::cos(robot_yaw_) - target_y * std::sin(robot_yaw_);
+        double target_wy = robot_y_ + target_x * std::sin(robot_yaw_) + target_y * std::cos(robot_yaw_);
+
         // 处理扫描点：过滤并收集障碍信息
         std::vector<std::pair<double, double>> points;
         points.reserve(scan_msg->ranges.size());
@@ -177,21 +202,39 @@ public:
                                    point_y > -ROBOT_FRAME_RIGHT && point_y < ROBOT_FRAME_LEFT);
             if (in_robot_frame) continue;
 
-            // 排除UWB目标附近的点 — 这些点来自被跟随者，不应视为障碍物
+            // 栅格动静分离：靠近目标的动态点 = 人腿，静态点 = 障碍物
+            double wx = robot_x_ + point_x * std::cos(robot_yaw_) - point_y * std::sin(robot_yaw_);
+            double wy = robot_y_ + point_x * std::sin(robot_yaw_) + point_y * std::cos(robot_yaw_);
+            uint8_t cell_count = grid_.getCell(wx, wy);
             double dist_to_target = std::sqrt(
-                (point_x - target_x) * (point_x - target_x) +
-                (point_y - target_y) * (point_y - target_y));
-            if (dist_to_target < TARGET_MASK_RADIUS) continue;
+                (wx - target_wx) * (wx - target_wx) +
+                (wy - target_wy) * (wy - target_wy));
 
-            points.emplace_back(point_x, point_y);
+            if (cell_count >= LocalOccupancyGrid::STATIC_THRESH) {
+                // 连续多帧出现 → 静态障碍 → 保留
+                points.emplace_back(point_x, point_y);
+                if (enable_opencv_) {
+                    // 静态障碍覆盖为蓝色
+                    cv::circle(image, toPixel(point_x, point_y), 2,
+                               cv::Scalar(255, 0, 0), -1, cv::LINE_AA);
+                }
+            } else if (dist_to_target < 0.5) {
+                // 靠近目标的新点 → 可能是人腿 → 不进障碍列表
+                if (enable_opencv_) {
+                    cv::circle(image, toPixel(point_x, point_y), 2,
+                               cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
+                }
+            } else {
+                // 远离目标的新点 → 新障碍 → 保留
+                points.emplace_back(point_x, point_y);
+            }
+
+            // 写入栅格
+            grid_.occupy(wx, wy);
         }
 
         // 更新点云缓存
         state_.setPoints(std::move(points));
-
-        // 获取当前速度
-        double cur_vx, cur_vy, cur_wz;
-        state_.getVelocity(cur_vx, cur_vy, cur_wz);
 
         // 从缓存读取障碍点
         std::vector<std::pair<double, double>> obstacles = state_.getPoints();
@@ -264,7 +307,10 @@ private:
     bool enable_kalman_ = false;
     KalmanFilter2D kalman_;
     DWAPlanner dwa_planner_;
+    LocalOccupancyGrid grid_;
+    double robot_x_ = 0.0, robot_y_ = 0.0, robot_yaw_ = 0.0;
     std::chrono::steady_clock::time_point last_uwb_time_ = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point last_scan_time_;
     VelocityCallback velocity_callback_;
     DataBroadcastCallback data_broadcast_callback_;
     
