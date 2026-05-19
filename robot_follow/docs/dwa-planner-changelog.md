@@ -2,20 +2,21 @@
 
 ## 1. 版本对比概览
 
-| 维度 | V1.0 (6166d8e) | V1.1 (7aeb4a7) | V1.2 (051f85d) | V1.3 (当前) |
-|------|----------------|----------------|----------------|-------------|
-| 日期 | 2026-05-07 | 2026-05-08 | 2026-05-09 | 2026-05-13 |
-| 最高速度 | 1.0 m/s | 0.45 m/s | 0.45 m/s | 0.45 m/s |
-| 否决距离 | 0.15 m | 0.50 m (含半径) | 0.35 m (点模型) | 0.35 m (点模型) |
-| 安全距离 | 0.4 m | 0.5 m | 0.5 m | 0.5 m |
-| 目标遮罩 | 无 | 0.45m | 0.25m | 0.30m |
-| 安全评分 | 线性 | 非线性指数 + 障碍密度 | 非线性指数 + 障碍密度 | 非线性指数 + 障碍密度 |
-| 卡死恢复 | 无 | 原地旋转 | 横向平移 vy=±0.15 | 横向平移 vy=±0.25 + 趋势否决 |
-| UWB 丢失 | 追假位置 | 追假位置 | 停止→超时旋转搜索 | 三态(正常/陈旧/超时) + RSSI=-79 |
-| 朝向评分 | 线性 1-angle/π | 线性 1-angle/π | 线性 1-angle/π | cos(angle) 非线性 |
-| 速度对齐 | 无 | 无 | 无 | |cos(target_angle)| 惩罚斜行 |
-| wz 加速度 | 2.0 | 2.0 | 2.0 | 4.0 rad/s² |
-| 距离衰减 | 0.8× + 0.2 | 0.25× + 0.15 | 0.5× + 0.15 | 0.5× + 0.15 |
+| 维度 | V1.0 (6166d8e) | V1.1 (7aeb4a7) | V1.2 (051f85d) | V1.3 | V1.4 (当前) |
+|------|----------------|----------------|----------------|------|-------------|
+| 日期 | 2026-05-07 | 2026-05-08 | 2026-05-09 | 2026-05-13 | 2026-05-19 |
+| 最高速度 | 1.0 m/s | 0.45 m/s | 0.45 m/s | 0.45 m/s | 0.45 m/s |
+| 否决距离 | 0.15 m | 0.50 m (含半径) | 0.35 m (点模型) | 0.35 m (点模型) | 0.35 m (点模型) |
+| 安全距离 | 0.4 m | 0.5 m | 0.5 m | 0.5 m | 0.5 m |
+| 目标遮罩 | 无 | 0.45m | 0.25m | 0.30m | 占据栅格动态分离 |
+| 安全评分 | 线性 | 非线性指数 + 障碍密度 | 非线性指数 + 障碍密度 | 非线性指数 + 障碍密度 | 非线性指数 + 障碍密度 |
+| 卡死恢复 | 无 | 原地旋转 | 横向平移 vy=±0.15 | 横向平移 vy=±0.25 + 趋势否决 | 横向平移 vy=±0.25 + 趋势否决 |
+| UWB 丢失 | 追假位置 | 追假位置 | 停止→超时旋转搜索 | 三态(正常/陈旧/超时) + RSSI=-79 | 三态(正常/陈旧/超时) + RSSI=-79 |
+| 朝向评分 | 线性 1-angle/π | 线性 1-angle/π | 线性 1-angle/π | cos(angle) 终点 | cos²(angle) 每步平均 |
+| 速度对齐 | 无 | 无 | 无 | |cos(target_angle)| 惩罚斜行 | |cos(target_angle)| 惩罚斜行 |
+| wz 加速度 | 2.0 | 2.0 | 2.0 | 4.0 rad/s² | 2.5 rad/s² |
+| 距离衰减 | 0.8× + 0.2 | 0.25× + 0.15 | 0.5× + 0.15 | 0.5× + 0.15 | 0.5× + 0.15 |
+| 控制模式 | 纯 DWA | 纯 DWA | 纯 DWA | 纯 DWA | 两阶段(PD直走/DWA避障) |
 
 ---
 
@@ -656,38 +657,209 @@ debug=true 时打印完整评分分解（heading/clearance/density/velocity/targ
 
 ---
 
-## 5. 已知问题与后续改进方向
+## 5. V1.4 变更清单（2026-05-19）
+
+### 变更 25：每步朝向评分 + cos² 陡峭化（38a5a6b）
+
+**文件**: `dwa_planner.hpp` + `common_types.hpp`
+
+**改动 25a — 仿真每步累积朝向评分**:
+```diff
++ double heading_sum = 0.0;
+  for (int k = 0; k < num_steps; ++k) {
+      x += ...; y += ...; theta += ...;
++     // 每步朝向评分累积
++     double step_tx = (target_x - x) * cos(theta) + (target_y - y) * sin(theta);
++     double step_ty = -(target_x - x) * sin(theta) + (target_y - y) * cos(theta);
++     double step_angle = abs(atan2(step_ty, step_tx));
++     heading_sum += cos(step_angle) * cos(step_angle);
+  }
+- double heading_score = cos(angle_error);  // 只看终点
++ double heading_score = heading_sum / num_steps;  // 全程平均
+```
+
+**改动 25b — cos² 代替 cos**:
+```diff
+- double heading_score = std::cos(angle_error);
++ double step_cos = std::cos(step_angle);
++ heading_sum += step_cos * step_cos;
+```
+
+**改动 25c — 权重再平衡**:
+```diff
+- constexpr double DWA_WEIGHT_HEADING = 0.35;
+- constexpr double DWA_WEIGHT_VELOCITY = 0.10;
++ constexpr double DWA_WEIGHT_HEADING = 0.44;
++ constexpr double DWA_WEIGHT_VELOCITY = 0.01;
+```
+
+**原因**: 旧版朝向评分只看 15 步仿真终点处机器人与目标的角度。DWA 可以"作弊"：选一条前 14 步斜着走、第 15 步才转正的轨迹，评分很高。但实际只执行第 1 步，所以机器人在每一帧都"承诺"下一个 1.5s 会转正，却从不兑现。这就是**斜着走的根本原因**。
+
+改为每步累积平均后，中途斜着走的每一步都会被记录下来，真正面朝目标的轨迹才能得高分。cos² 比 cos 更陡峭：30° → 0.75 vs 0.866，区分度更大。
+
+速度权重从 0.10 降到 0.01：cos² + 每步平均已提供足够区分度，速度分不再需要主导。
+
+---
+
+### 变更 26：局部占据栅格替换目标遮罩（89540c0）
+
+**文件**: `local_occupancy_grid.hpp`（新建） + `lidar_tracker.hpp` + `common_types.hpp`
+
+**改动 26a — 新建占据栅格类**（`local_occupancy_grid.hpp`）:
+- 5cm 分辨率，40×40 格 = 2m×2m 覆盖
+- 每次占据 +2，每帧衰减 -1
+- 同一世界坐标连续出现 3 帧 → 判定为静态障碍
+- 基于里程计积分定位栅格原点
+
+**改动 26b — 动静分离逻辑**（`lidar_tracker.hpp`）:
+```diff
+- // 固定半径遮罩：目标周围 TARGET_MASK_RADIUS 内的点全部排除
+- if (dist_to_target < TARGET_MASK_RADIUS) continue;
+
++ // 占据栅格分类：持续出现的点是静态障碍，短暂出现的是人腿
++ uint8_t cell_count = grid_.getCell(wx, wy);
++ if (cell_count >= STATIC_THRESH) {
++     points.push_back({point_x, point_y});  // 静态障碍 → 送入 DWA
++ } else if (dist_to_target < 0.5) {
++     // 新点靠近目标 → 人腿 → 跳过
++ } else {
++     points.push_back({point_x, point_y});  // 其他新障碍
++ }
++ grid_.occupy(wx, wy);
+```
+
+**改动 26c — 里程计积分**:
+```diff
++ // 从速度指令积分世界位姿
++ robot_yaw_ += cur_wz * dt;
++ robot_x_ += (cur_vx * cos(robot_yaw_) - cur_vy * sin(robot_yaw_)) * dt;
++ robot_y_ += (cur_vx * sin(robot_yaw_) + cur_vy * cos(robot_yaw_)) * dt;
++ grid_.decay();
++ grid_.setOrigin(robot_x_, robot_y_);
+```
+
+**原因**: 固定半径遮罩（TARGET_MASK_RADIUS=0.3m）有盲区——当被跟随者贴着墙壁或柱子时，墙/柱的 LiDAR 点也落在遮罩内被排除，导致 DWA 看不见真实障碍物。这是**方案 D**（时间维度动静分离）的实现。
+
+占据栅格利用"人的腿在动、墙/柱不动"的特性：在同一个世界坐标持续出现的点判定为静态障碍物，短暂出现的点（如人腿经过）判定为动态目标。彻底解决了遮罩盲区问题。
+
+**参数**:
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| RESOLUTION | 0.05m | 栅格分辨率 |
+| SIZE | 40 | 40×40 格 = 2m×2m |
+| OCCUPY_INCREMENT | 2 | 每次占据 +2 |
+| STATIC_THRESH | 3 | 连续出现 3 帧判定为静态 |
+| 衰减 | -1/帧 | 不再出现的点逐渐归零 |
+
+---
+
+### 变更 27：两阶段控制 — PD 直走 + DWA 避障（95796d4）
+
+**文件**: `dwa_planner.hpp` + `common_types.hpp`
+
+**改动 27a — 前方走廊检查**:
+```diff
++ // 检查目标方向矩形走廊 (0.5m宽 × 1.2m长) 内是否有障碍物
++ bool isCorridorClear(obstacles, target_x, target_y, target_dist) {
++     for (auto& obs : obstacles) {
++         double proj = (ox*tx + oy*ty) / target_dist;
++         if (proj < 0 || proj > min(target_dist, 1.2)) continue;
++         double perp = abs(ox*ty - oy*tx) / target_dist;
++         if (perp < 0.25) return false;
++     }
++     return true;
++ }
+```
+
+**改动 27b — PD 朝向控制器**:
+```diff
++ if (isCorridorClear(...)) {
++     double heading_error = atan2(target_y, target_x);
++     double diff = heading_error - prev_heading_error_;  // 归一化 ±π
++     double heading_error_rate = diff / 0.1;
++     prev_heading_error_ = heading_error;
++
++     // 死区 3°: 小角度不转
++     if (abs(heading_error) < 0.05) wz = 0;
++     else wz = clamp(1.0 * heading_error + 0.3 * heading_error_rate, ...);
++
++     vx = DWA_MAX_VX * cos(heading_error) * dist_factor;
++     return {vx, 0.0, wz, 1.0};  // vy=0, 不横移
++ }
+```
+
+**改动 27c — DWA 参数微调**:
+```diff
+- constexpr double DWA_ACC_WZ = 4.0;
+- constexpr double DWA_WEIGHT_HEADING = 0.44;
+- constexpr double DWA_WEIGHT_TARGET_DIST = 0.15;
++ constexpr double DWA_ACC_WZ = 2.5;
++ constexpr double DWA_WEIGHT_HEADING = 0.40;
++ constexpr double DWA_WEIGHT_TARGET_DIST = 0.19;
+```
+
+**两阶段控制逻辑**:
+```
+每帧:
+  if (目标方向 0.5m×1.2m 走廊内无障碍):
+    → PD 控制器: wz = Kp*err + Kd*err_rate, vy=0
+    → 直直地朝目标走，不斜行
+  else:
+    → 完整 DWA 采样评分
+    → 避障模式，允许 vy/wz 绕行
+```
+
+**原因**: 之前的纯 DWA 加权求和评分中，各评分项可以互相"买分"——朝向不好用 vy 快速侧移补回来，导致狗斜着走。即使反复调整权重也无法根除（20° 偏差下 heading 扣 0.25 分，但 vy 速度分可以补回 0.3 分）。
+
+两阶段控制从根本上分离"直走"和"避障"：无障碍时不需要 DWA 做多目标权衡——直接 P 控制转正 + 直走即可。障碍出现时才启用 DWA 绕行。
+
+**PD 控制器参数**:
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| KP_HEADING | 1.0 | P 增益，决定转正速度 |
+| KD_HEADING | 0.3 | D 增益，阻尼振荡（"刹车"效果） |
+| HEADING_DEADBAND | 0.05 rad (3°) | 死区，防止小误差抖动 |
+| CORRIDOR_HALF_WIDTH | 0.25m | 走廊半宽 |
+| CORRIDOR_MAX_LENGTH | 1.2m | 走廊最大检查距离 |
+
+**D 项的作用**: 当机器人快速转正时，heading_error 在减小（负变化率），D 项产生反向力矩提前减速。例如 heading_error 从 10°→5° 时，P=0.087, D=-0.22，wz 在到达 0 之前就开始减小，不再过冲振荡。
+
+---
+
+## 6. 已知问题与后续改进方向
 
 | 问题 | 现状 | 改进方向 |
 |------|------|---------|
 | 太近时不会后退 | velocity_score 允许负值但不激励后退 | 目标过近时增加后退奖励 |
-| 目标遮罩盲区 | TARGET_MASK_RADIUS=0.3m 可能漏掉障碍 | 自适应遮罩（根据障碍密度调整） |
 | 点模型碰撞检测 | 从中心算距离，忽略机器人宽度 | 考虑椭圆模型（机身 0.7m×0.35m） |
 | 动态窗口受加速度限制 | 恢复轨迹 vy 受限于 DWA_MAX_VY=0.3 | 恢复时可放宽速度限制 |
 | 无 AOA 角度区分 | UWB 只给距离，不知道人在左/右 | 利用 AOA 提前调整朝向 |
+| 里程计漂移 | 速度积分位姿无外部校正 | 长时间运行栅格原点可能偏移 |
 
 ---
 
-## 6. DWA 使用说明
+## 7. DWA 使用说明
 
-### 6.1 参数调优
+### 7.1 参数调优
 
-所有可调参数在 `common_types.hpp` 中，重新编译生效：
+所有可调参数在 `common_types.hpp` 和 `dwa_planner.hpp` 中，重新编译生效：
 
 | 参数 | 默认值 | 调大/调小的效果 |
 |------|--------|----------------|
 | `DWA_MAX_VX` | 0.45 | ↑ 更快速 / ↓ 更平稳 |
 | `DWA_EMERGENCY_DIST` | 0.35 | ↑ 更保守(保持距离) / ↓ 更激进 |
 | `DWA_SAFE_DIST` | 0.5 | ↑ 更早触发绕行 / ↓ 更晚绕行 |
-| `DWA_WEIGHT_HEADING` | 0.35 | ↑ 更积极面朝目标 / ↓ 更注重侧面移动 |
+| `DWA_WEIGHT_HEADING` | 0.40 | ↑ 更积极面朝目标 / ↓ 更注重侧面移动 |
 | `DWA_WEIGHT_CLEARANCE` | 0.40 | ↑ 更保守避障 / ↓ 更激进贴近障碍 |
-| `DWA_WEIGHT_VELOCITY` | 0.10 | ↑ 更快速 / ↓ 更慢 |
-| `DWA_WEIGHT_TARGET_DIST` | 0.15 | ↑ 更精确保持跟随距离 / ↓ 距离容忍更大 |
-| `TARGET_MASK_RADIUS` | 0.30 | ↑ 排除更大范围 / ↓ 保留更多障碍点 |
+| `DWA_WEIGHT_VELOCITY` | 0.01 | ↑ 更快速 / ↓ 更慢 |
+| `DWA_WEIGHT_TARGET_DIST` | 0.19 | ↑ 更精确保持跟随距离 / ↓ 距离容忍更大 |
 | `FOLLOW_DIST` | 0.6 | ↑ 跟得更远 / ↓ 跟得更近 |
-| `DWA_ACC_WZ` | 4.0 | ↑ 转弯更快 / ↓ 转弯更平缓 |
+| `DWA_ACC_WZ` | 2.5 | ↑ 转弯更快 / ↓ 转弯更平缓 |
+| `KP_HEADING` | 1.0 | ↑ 直走模式转正更快 / ↓ 更平缓 |
+| `KD_HEADING` | 0.3 | ↑ 阻尼更强 / ↓ 可能过冲 |
+| `CORRIDOR_MAX_LENGTH` | 1.2 | ↑ 更早切避障 / ↓ 更晚切避障 |
 
-### 6.2 常见场景调优
+### 7.2 常见场景调优
 
 **场景 1: 狭窄走廊，机器狗贴墙走**
 ```
@@ -713,7 +885,7 @@ debug=true 时打印完整评分分解（heading/clearance/density/velocity/targ
 调小 TARGET_MASK_RADIUS (0.30 → 0.20) — 避免把墙也排除
 ```
 
-### 6.3 调试技巧
+### 7.3 调试技巧
 
 1. **OpenCV 可视化**: launch 文件设 `enable_opencv: true`，窗口内：
    - 红色点 = 否决距离内的障碍
